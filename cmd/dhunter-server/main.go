@@ -116,6 +116,20 @@ func main() {
 
 		reportH := handler.NewReportHandler(stores)
 		api.GET("/runs/:id/report", reportH.Markdown)
+
+		// Board (blackboard): facts / intents / hints + graph export.
+		boardH := handler.NewBoardHandler(stores, hub)
+		api.GET("/runs/:id/facts", boardH.ListFacts)
+		api.POST("/runs/:id/facts", boardH.CreateFact)
+		api.GET("/runs/:id/intents", boardH.ListIntents)
+		api.POST("/runs/:id/intents", boardH.CreateIntent)
+		api.POST("/runs/:id/intents/:iid/claim", boardH.ClaimIntent)
+		api.POST("/runs/:id/intents/:iid/release", boardH.ReleaseIntent)
+		api.POST("/runs/:id/intents/:iid/conclude", boardH.ConcludeIntent)
+		api.POST("/runs/:id/intents/:iid/fail", boardH.FailIntent)
+		api.GET("/runs/:id/hints", boardH.ListHints)
+		api.POST("/runs/:id/hints", boardH.CreateHint)
+		api.GET("/runs/:id/graph", boardH.Graph)
 	}
 
 	// SSE — registered outside the auth group so it can accept

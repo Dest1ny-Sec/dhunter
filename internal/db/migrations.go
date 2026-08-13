@@ -91,6 +91,48 @@ var migrations = []string{
 		created_at      INTEGER NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_findings_run ON findings(run_id);`,
+
+	// facts — the board's confirmed observations (cairn-style blackboard).
+	// Facts are append-only: state changes are new facts, never edits.
+	`CREATE TABLE IF NOT EXISTS facts (
+		id          TEXT PRIMARY KEY,
+		run_id      TEXT NOT NULL,
+		description TEXT NOT NULL,
+		source      TEXT NOT NULL DEFAULT '',
+		created_at  INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_facts_run ON facts(run_id);`,
+
+	// intents — declared directions of exploration on the board.
+	//   open      → proposed, no worker claimed it yet
+	//   claimed   → a worker is exploring it
+	//   concluded → a worker produced a fact (to_fact_id set)
+	//   failed    → the worker gave up / errored
+	`CREATE TABLE IF NOT EXISTS intents (
+		id           TEXT PRIMARY KEY,
+		run_id       TEXT NOT NULL,
+		from_facts   TEXT NOT NULL DEFAULT '[]',
+		description  TEXT NOT NULL,
+		creator      TEXT NOT NULL DEFAULT '',
+		worker       TEXT,
+		status       TEXT NOT NULL DEFAULT 'open',
+		to_fact_id   TEXT,
+		created_at   INTEGER NOT NULL,
+		claimed_at   INTEGER,
+		concluded_at INTEGER
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_intents_run ON intents(run_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_intents_status ON intents(status);`,
+
+	// hints — human judgement injected into the board mid-run.
+	`CREATE TABLE IF NOT EXISTS hints (
+		id         TEXT PRIMARY KEY,
+		run_id     TEXT NOT NULL,
+		content    TEXT NOT NULL,
+		creator    TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_hints_run ON hints(run_id);`,
 }
 
 // Migrate runs every DDL statement in order, then applies per-column

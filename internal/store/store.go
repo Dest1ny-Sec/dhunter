@@ -107,6 +107,7 @@ type Stores struct {
 	Vulns     *VulnStore
 	ToolCalls *ToolCallStore
 	Findings  *FindingStore
+	Board     *Board
 }
 
 // New constructs every store over the shared *db.DB.
@@ -119,6 +120,7 @@ func New(database *db.DB) *Stores {
 		Vulns:     &VulnStore{db: database},
 		ToolCalls: &ToolCallStore{db: database},
 		Findings:  &FindingStore{db: database},
+		Board:     newBoard(database),
 	}
 }
 
