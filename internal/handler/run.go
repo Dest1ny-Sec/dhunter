@@ -1,0 +1,123 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/dhunter/dhunter/internal/agent"
+	"github.com/dhunter/dhunter/internal/store"
+	"github.com/dhunter/dhunter/internal/stream"
+)
+
+// RunHandler handles POST /api/runs.
+type RunHandler struct {
+	Stores *store.Stores
+	Bridge *agent.Bridge
+	Hub    *stream.Hub
+}
+
+// NewRunHandler constructs a RunHandler.
+func NewRunHandler(s *store.Stores, b *agent.Bridge, h *stream.Hub) *RunHandler {
+	return &RunHandler{Stores: s, Bridge: b, Hub: h}
+}
+
+// createRunReq is the JSON body for POST /api/runs.
+type createRunReq struct {
+	TargetID  string `json:"target_id"`
+	Objective string `json:"objective"`
+}
+
+// Create kicks off a new agent run.
+//
+// We persist the run first (so /api/runs/{id} is queryable even if the
+// sidecar is briefly down), then asynchronously ask the Python agent
+// to start work and to stream events back. The HTTP response is
+// returned as soon as the row is durable.
+func (h *RunHandler) Create(c *gin.Context) {
+	var req createRunReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	if req.TargetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_id is required"})
+		return
+	}
+	target, err := h.Stores.Targets.Get(c.Request.Context(), req.TargetID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	run := &store.Run{
+		TargetID:  target.ID,
+		Objective: req.Objective,
+		Status:    "running",
+		StartedAt: time.Now().UTC(),
+	}
+	if err := h.Stores.Runs.Create(c.Request.Context(), run); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "create run: " + err.Error()})
+		return
+	}
+
+	// Fire-and-forget: spawn the sidecar call in a goroutine. We use a
+	// detached context so the request finishing doesn't cancel the
+	// agent's streaming subscription.
+	go h.startAgent(run, target.Value)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"id":     run.ID,
+		"run_id": run.ID, // kept for backward compatibility with older clients
+		"status": run.Status,
+	})
+}
+
+// startAgent asks the Python sidecar to start the run and then
+// subscribes to its SSE stream. If either call fails we mark the run as
+// failed in the store so the UI can surface a useful error.
+func (h *RunHandler) startAgent(run *store.Run, targetValue string) {
+	// Slightly longer than the Python agent's overall timeout (default 1h)
+	// so the bridge never yanks the stream out from under a still-running
+	// agent. Both are configurable via env.
+	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Minute)
+	defer cancel()
+
+	if err := h.Bridge.CreateRun(ctx, agent.CreateRunRequest{
+		RunID:     run.ID,
+		Target:    targetValue,
+		Objective: run.Objective,
+	}); err != nil {
+		h.markFailed(run.ID, err)
+		return
+	}
+	if err := h.Bridge.Subscribe(ctx, run.ID); err != nil {
+		h.markFailed(run.ID, err)
+		return
+	}
+	// Successful end-of-stream: ensure the run is marked completed even
+	// if the sidecar forgot to send run_done.
+	ended := time.Now().UTC()
+	_ = h.Stores.Runs.Update(ctx, &store.Run{
+		ID:      run.ID,
+		Status:  "completed",
+		EndedAt: &ended,
+	})
+}
+
+func (h *RunHandler) markFailed(runID string, cause error) {
+	ended := time.Now().UTC()
+	_ = h.Stores.Runs.Update(context.Background(), &store.Run{
+		ID:      runID,
+		Status:  "failed",
+		Summary: "agent error: " + cause.Error(),
+		EndedAt: &ended,
+	})
+}

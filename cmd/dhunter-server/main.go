@@ -1,0 +1,300 @@
+// Command dhunter-server is the Dhunter API + SSE host.
+//
+// It wires the Gin router, opens the SQLite database, runs migrations,
+// and starts the HTTP listener with graceful shutdown on SIGINT/SIGTERM.
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/dhunter/dhunter/internal/agent"
+	"github.com/dhunter/dhunter/internal/config"
+	"github.com/dhunter/dhunter/internal/db"
+	"github.com/dhunter/dhunter/internal/handler"
+	"github.com/dhunter/dhunter/internal/middleware"
+	"github.com/dhunter/dhunter/internal/store"
+	"github.com/dhunter/dhunter/internal/stream"
+)
+
+func main() {
+	var (
+		cfgPath = flag.String("config", "./configs/dhunter.yaml", "path to YAML config")
+		port    = flag.Int("port", 0, "override server port (env DHUNTER_PORT also works)")
+		httpOn  = flag.Bool("http", false, "alias: explicitly opt in to plain HTTP (default)")
+	)
+	flag.Parse()
+	_ = httpOn // accepted for forward-compat; HTTPS is out of MVP scope
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		log.Fatalf("dhunter: load config: %v", err)
+	}
+	if *port > 0 {
+		cfg.Server.Port = *port
+	}
+
+	// --- Bootstrap admin password (first run only) -----------------
+	passwordHash, generated, err := bootstrapAdmin(cfg)
+	if err != nil {
+		log.Fatalf("dhunter: bootstrap admin: %v", err)
+	}
+	printBanner(cfg, generated)
+
+	// --- Database --------------------------------------------------
+	database, err := db.Open(cfg.Storage.SQLitePath)
+	if err != nil {
+		log.Fatalf("dhunter: open db: %v", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = database.Close(shutdownCtx)
+	}()
+
+	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := database.Migrate(bootCtx); err != nil {
+		cancelBoot()
+		log.Fatalf("dhunter: migrate: %v", err)
+	}
+	cancelBoot()
+
+	// --- Stores / hub / agent bridge -------------------------------
+	stores := store.New(database)
+	hub := stream.New()
+	bridge := agent.New(cfg.Agent.PythonURL, stores, hub)
+
+	// --- Router ----------------------------------------------------
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(requestLogger())
+	router.Use(corsForDev())
+
+	mountWebUI(router)
+	router.GET("/api/healthz", handler.Healthz)
+	router.POST("/api/auth/login", handler.NewAuthHandler(cfg.Admin.Token, passwordHash).Login)
+
+	// Authenticated API group.
+	api := router.Group("/api")
+	api.Use(middleware.Bearer(cfg.Admin.Token))
+	{
+		targetH := handler.NewTargetHandler(stores)
+		api.POST("/targets", targetH.Create)
+		api.GET("/targets", targetH.List)
+		api.GET("/targets/:id", targetH.Get)
+
+		runH := handler.NewRunHandler(stores, bridge, hub)
+		api.POST("/runs", runH.Create)
+
+		runsH := handler.NewRunsHandler(stores)
+		api.GET("/runs", runsH.List)
+		api.GET("/runs/:id", runsH.Get)
+		api.GET("/runs/:id/messages", runsH.Messages)
+		api.GET("/runs/:id/vulnerabilities", runsH.Vulnerabilities)
+		api.GET("/runs/:id/tool_calls", runsH.ToolCalls)
+		api.GET("/targets/:id/runs", runsH.ProjectRuns)
+
+		vulnsH := handler.NewVulnsHandler(stores)
+		api.GET("/vulnerabilities", vulnsH.List)
+		api.POST("/vulnerabilities", vulnsH.Create)
+
+		reportH := handler.NewReportHandler(stores)
+		api.GET("/runs/:id/report", reportH.Markdown)
+	}
+
+	// SSE — registered outside the auth group so it can accept
+	// `?token=...` directly. The handler itself re-checks the token
+	// (EventSource can't set headers), so the token is passed in here.
+	sseH := handler.NewSSEHandler(hub, stores, cfg.KeepAlive(), cfg.Admin.Token)
+	router.GET("/api/runs/:id/events", sseH.Events)
+
+	// --- Server + graceful shutdown --------------------------------
+	// Binds 127.0.0.1 by default. For remote/team access, set
+	// `server.host: 0.0.0.0` explicitly (and put TLS in front).
+	srv := &http.Server{
+		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:           router,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("dhunter: listening on %s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("dhunter: server: %v", err)
+		}
+	}()
+
+	<-stop
+	log.Printf("dhunter: shutdown signal received")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("dhunter: graceful shutdown failed: %v", err)
+	}
+	log.Printf("dhunter: bye")
+}
+
+// bootstrapAdmin returns the bcrypt hash to use for the admin password.
+// If a bootstrap password is configured in YAML, we hash it. Otherwise
+// we generate a fresh 16-byte random password, print it once in the
+// banner, and hash it. The plaintext is never persisted.
+func bootstrapAdmin(cfg *config.Config) (hash string, generated bool, err error) {
+	if cfg.Admin.BootstrapPassword != "" {
+		h, err := bcrypt.GenerateFromPassword([]byte(cfg.Admin.BootstrapPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return "", false, err
+		}
+		return string(h), false, nil
+	}
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", false, err
+	}
+	plain := hex.EncodeToString(raw)
+	h, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	if err != nil {
+		return "", false, err
+	}
+	// Stash the plaintext on the config so the banner can print it.
+	cfg.Admin.BootstrapPassword = plain
+	return string(h), true, nil
+}
+
+// printBanner dumps the multi-line startup banner. The format is
+// deliberately fixed-width so it reads the same in a terminal and in a
+// log file.
+func printBanner(cfg *config.Config, adminGenerated bool) {
+	addr := fmt.Sprintf("http://127.0.0.1:%d/", cfg.Server.Port)
+	banner := []string{
+		"╔════════════════════════════════════════════════════════╗",
+		"║                       Dhunter                          ║",
+		"║          AI-driven web penetration testing             ║",
+		"╚════════════════════════════════════════════════════════╝",
+		"",
+		fmt.Sprintf("  ONLINE  %s", addr),
+		fmt.Sprintf("  AGENT   %s", cfg.Agent.PythonURL),
+		fmt.Sprintf("  MCP     %s", cfg.MCP.WebHunter.URL),
+		fmt.Sprintf("  LLM     %s / %s", cfg.LLM.Provider, cfg.LLM.Model),
+		fmt.Sprintf("  STORE   %s", cfg.Storage.SQLitePath),
+		"",
+	}
+	if adminGenerated {
+		banner = append(banner,
+			"  ADMIN SETUP REQUIRED",
+			fmt.Sprintf("    password: %s", cfg.Admin.BootstrapPassword),
+			"    token:    "+cfg.Admin.Token,
+			"    (change both in configs/dhunter.yaml before exposing the API)",
+		)
+	} else {
+		banner = append(banner,
+			"  ADMIN",
+			"    using configured bootstrap password (set in YAML)",
+			"    token: "+cfg.Admin.Token,
+		)
+	}
+	for _, line := range banner {
+		fmt.Println(line)
+	}
+}
+
+// requestLogger is a minimal access log. The default gin.Logger writes
+// to stdout with ANSI colour codes; we want a single clean line per
+// request.
+func requestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		log.Printf("dhunter: %s %s %d %s",
+			c.Request.Method, c.Request.URL.Path,
+			c.Writer.Status(), time.Since(start).Truncate(time.Microsecond))
+	}
+}
+
+// corsForDev allows any origin. The MVP ships a single-binary sidecar
+// model; browsers are expected to be on the same machine. A future
+// release will restrict this to the configured web origin.
+func corsForDev() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
+
+// pathExists is a small helper used by tests / setup scripts.
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil || !errors.Is(err, os.ErrNotExist)
+}
+
+// mountWebUI serves the Vite-built SPA from <repo>/frontend/dist (if it
+// exists). The API owns `/api/*`; everything else is treated as a Vue
+// route and falls back to `index.html` so client-side routing works.
+func mountWebUI(router *gin.Engine) {
+	candidates := []string{
+		"./frontend/dist",
+		"./web",
+		"./dist",
+		"./public",
+	}
+	exeDir, _ := os.Getwd()
+	for _, rel := range candidates {
+		abs := rel
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(exeDir, rel)
+		}
+		if st, err := os.Stat(abs); err == nil && st.IsDir() {
+			indexPath := filepath.Join(abs, "index.html")
+			if _, err := os.Stat(indexPath); err != nil {
+				continue
+			}
+			fs := http.FileServer(http.Dir(abs))
+			router.NoRoute(func(c *gin.Context) {
+				p := c.Request.URL.Path
+				if strings.HasPrefix(p, "/api/") {
+					c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+					return
+				}
+				// Serve real file if it exists; otherwise hand back
+				// index.html so the Vue router can take over.
+				full := filepath.Join(abs, filepath.Clean(p))
+				if p != "/" {
+					if st, err := os.Stat(full); err == nil && !st.IsDir() {
+						fs.ServeHTTP(c.Writer, c.Request)
+						return
+					}
+				}
+				c.File(indexPath)
+			})
+			log.Printf("dhunter: web UI mounted at %s", abs)
+			return
+		}
+	}
+	log.Printf("dhunter: no web UI found (frontend/dist not built) — only API is served")
+}
+
+var _ = filepath.Join // keep filepath import if future flags need it

@@ -1,0 +1,26 @@
+server:
+  port: 13343
+  host: "127.0.0.1"
+  sse_keepalive_seconds: 15
+
+agent:
+  python_url: "http://127.0.0.1:9100"
+
+mcp:
+  webhunter:
+    url: "http://127.0.0.1:9124/message"
+    token: "dhunter-mcp-please-change-me"
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-5
+  base_url: "https://api.minimaxi.com/anthropic"
+  api_key: ""
+  max_tokens: 32768
+
+storage:
+  sqlite_path: "/Users/destiny/Downloads/dhunter/data/dhunter.db"
+
+admin:
+  bootstrap_password: ""
+  token: "dhunter-admin-please-change-me"

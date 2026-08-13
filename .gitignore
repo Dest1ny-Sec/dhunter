@@ -1,0 +1,31 @@
+# Binaries / build output
+/bin/
+dist/
+
+# Runtime data (SQLite DB, WAL, SHM)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Secrets / local state
+.dhunter.tokens
+.env
+.env.local
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Python
+agents/.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Logs / temp
+/tmp/
+nohup.out
+*.log
+
+# OS
+.DS_Store
