@@ -123,28 +123,53 @@ var validVulnStatuses = map[string]struct{}{
 	"open":      {}, // legacy / manually created
 }
 
-// PatchStatus handles PATCH /api/vulnerabilities/:id — flips the lifecycle
-// status (used by the agent's verifier: pending -> confirmed/dismissed).
-func (h *VulnsHandler) PatchStatus(c *gin.Context) {
+// validVulnSeverities accepted by the severity cap.
+var validVulnSeverities = map[string]struct{}{
+	"critical": {}, "high": {}, "medium": {}, "low": {}, "info": {},
+}
+
+// Patch handles PATCH /api/vulnerabilities/:id — the verifier flips the
+// lifecycle status (pending -> confirmed/dismissed) and may correct the
+// severity (SRC calibration).
+func (h *VulnsHandler) Patch(c *gin.Context) {
 	var body struct {
-		Status string `json:"status"`
+		Status   string `json:"status"`
+		Severity string `json:"severity"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
 		return
 	}
 	body.Status = strings.ToLower(strings.TrimSpace(body.Status))
-	if _, ok := validVulnStatuses[body.Status]; !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "status must be one of pending|confirmed|dismissed|open"})
-		return
-	}
-	if err := h.Stores.Vulns.UpdateStatus(c.Request.Context(), c.Param("id"), body.Status); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability not found"})
+	body.Severity = strings.ToLower(strings.TrimSpace(body.Severity))
+
+	if body.Status != "" {
+		if _, ok := validVulnStatuses[body.Status]; !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "status must be one of pending|confirmed|dismissed|open"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		if err := h.Stores.Vulns.UpdateStatus(c.Request.Context(), c.Param("id"), body.Status); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "id": c.Param("id"), "status": body.Status})
+	if body.Severity != "" {
+		if _, ok := validVulnSeverities[body.Severity]; !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "severity must be one of critical|high|medium|low|info"})
+			return
+		}
+		if err := h.Stores.Vulns.UpdateSeverity(c.Request.Context(), c.Param("id"), body.Severity); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": c.Param("id"), "status": body.Status, "severity": body.Severity})
 }

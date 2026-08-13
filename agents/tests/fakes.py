@@ -88,6 +88,12 @@ class FakeBoard:
                 v["status"] = status
                 return
 
+    async def set_vuln_severity(self, vuln_id: str, severity: str) -> None:
+        for v in self.vulns:
+            if v["id"] == vuln_id:
+                v["severity"] = severity
+                return
+
     async def create_hint(self, run_id: str, content: str, creator: str = "agent") -> None:
         self.hints.append({"id": self._new_id(), "run_id": run_id, "content": content, "creator": creator})
 

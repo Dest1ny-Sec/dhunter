@@ -120,7 +120,7 @@ func main() {
 		vulnsH := handler.NewVulnsHandler(stores)
 		api.GET("/vulnerabilities", vulnsH.List)
 		api.POST("/vulnerabilities", vulnsH.Create)
-		api.PATCH("/vulnerabilities/:id", vulnsH.PatchStatus)
+		api.PATCH("/vulnerabilities/:id", vulnsH.Patch)
 
 		reportH := handler.NewReportHandler(stores)
 		api.GET("/runs/:id/report", reportH.Markdown)

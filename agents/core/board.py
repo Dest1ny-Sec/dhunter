@@ -122,3 +122,9 @@ class BoardClient:
         resp = await self._request("PATCH", f"/api/vulnerabilities/{vuln_id}", json={"status": status})
         if resp.status_code >= 400:
             raise BoardError(f"set_vuln_status http {resp.status_code}: {resp.text[:300]}")
+
+    async def set_vuln_severity(self, vuln_id: str, severity: str) -> None:
+        """Correct a vulnerability's severity (SRC calibration)."""
+        resp = await self._request("PATCH", f"/api/vulnerabilities/{vuln_id}", json={"severity": severity})
+        if resp.status_code >= 400:
+            raise BoardError(f"set_vuln_severity http {resp.status_code}: {resp.text[:300]}")

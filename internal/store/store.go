@@ -481,6 +481,19 @@ func (s *VulnStore) UpdateStatus(ctx context.Context, id, status string) error {
 	return nil
 }
 
+// UpdateSeverity corrects a vulnerability's severity (verifier calibration).
+func (s *VulnStore) UpdateSeverity(ctx context.Context, id, severity string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE vulnerabilities SET severity = ? WHERE id = ?`, severity, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // FindDuplicate returns the ID of an existing vuln in the same run with
 // the same (normalized) title + target, or "" when none exists.
 func (s *VulnStore) FindDuplicate(ctx context.Context, runID, title, target string) (string, error) {

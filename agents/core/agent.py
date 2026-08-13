@@ -315,6 +315,15 @@ def render_graph_summary(graph: dict[str, Any], max_facts: int = 60) -> str:
     else:
         lines.append("- (none)")
 
+    # Already-explored directions (concluded = produced a fact; failed =
+    # dead end) so the planner doesn't re-propose the same work.
+    explored = [i for i in intents if i.get("status") in ("concluded", "failed")]
+    if explored:
+        lines.append(f"## Already explored ({len(explored)})")
+        for i in explored[-15:]:
+            mark = "dead-end" if i.get("status") == "failed" else "done"
+            lines.append(f"- {i.get('id', '?')} [{mark}]: {i.get('description', '')}")
+
     if hints:
         lines.append("## Human hints")
         for h in hints:
