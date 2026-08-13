@@ -1,0 +1,72 @@
+- generic [ref=e15]:
+  - banner [ref=e16]:
+    - generic [ref=e17]: ⬢ Dhunter
+    - generic [ref=e18]:
+      - text: admin
+      - button "Logout" [ref=e19] [cursor=pointer]
+  - navigation [ref=e20]:
+    - generic [ref=e21]: Workspace
+    - link "Targets" [ref=e22] [cursor=pointer]:
+      - /url: /targets
+    - link "Runs" [ref=e23] [cursor=pointer]:
+      - /url: /runs
+    - link "Vulnerabilities" [ref=e24] [cursor=pointer]:
+      - /url: /vulns
+    - link "Settings" [ref=e25] [cursor=pointer]:
+      - /url: /settings
+  - main [ref=e26]:
+    - generic [ref=e27]:
+      - heading "New Target" [level=2] [ref=e28]
+      - generic [ref=e29]: Enter a company name, domain, URL, or IP to begin an AI-driven reconnaissance and assessment.
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - generic [ref=e32]: Target
+          - textbox "e.g. acme.com, https://acme.com, 10.0.0.1, or \"Acme Corp\"" [ref=e33]
+        - generic [ref=e34]:
+          - generic [ref=e35]: Type
+          - combobox [ref=e36]:
+            - option "Auto-detect" [selected]
+            - option "Company"
+            - option "Domain"
+            - option "URL"
+            - option "IP"
+        - generic [ref=e37]:
+          - generic [ref=e38]: Objective (what the AI should look for)
+          - textbox [ref=e39]: Find SQLi, XSS, auth bypass, IDOR, and any real reproducible vulnerability. Report each with write_finding and a curl PoC.
+        - group [ref=e40]:
+          - generic "🔐 Authenticated session (optional) — give the AI your login so it can test behind-auth function points" [ref=e41] [cursor=pointer]
+        - generic [ref=e42]:
+          - button "Start" [ref=e43] [cursor=pointer]
+          - generic [ref=e44]: Or press Enter
+      - generic [ref=e45]:
+        - generic [ref=e46]: What happens next
+        - list [ref=e47]:
+          - listitem [ref=e48]: Target is registered and a new run is created
+          - listitem [ref=e49]: AI agent performs reconnaissance (subdomains, ports, tech stack)
+          - listitem [ref=e50]: Selected attack surfaces are probed for vulnerabilities
+          - listitem [ref=e51]: Report and findings are streamed back in real time
+      - generic [ref=e52]:
+        - heading "Recent targets" [level=2] [ref=e53]
+        - generic [ref=e54]: · 2 total
+      - table [ref=e55]:
+        - rowgroup [ref=e56]:
+          - row [ref=e57]:
+            - columnheader "Type" [ref=e58]
+            - columnheader "Value" [ref=e59]
+            - columnheader "Created" [ref=e60]
+            - columnheader [ref=e61]
+        - rowgroup [ref=e62]:
+          - row [ref=e63]:
+            - cell "url" [ref=e64]
+            - cell [ref=e66]:
+              - code [ref=e67]: http://127.0.0.1:3000
+            - cell "2026/8/14 01:15:44" [ref=e68]
+            - cell [ref=e69]:
+              - button "View runs" [ref=e70] [cursor=pointer]
+          - row [ref=e71]:
+            - cell "url" [ref=e72]
+            - cell [ref=e74]:
+              - code [ref=e75]: http://127.0.0.1:3000
+            - cell "2026/8/14 01:15:30" [ref=e76]
+            - cell [ref=e77]:
+              - button "View runs" [ref=e78] [cursor=pointer]

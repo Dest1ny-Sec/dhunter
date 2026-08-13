@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
+import UiButton from '../components/ui/UiButton.vue'
+import UiBadge from '../components/ui/UiBadge.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 
 const router = useRouter()
 
@@ -10,12 +13,13 @@ const targetType = ref<'auto' | 'company' | 'domain' | 'url' | 'ip'>('auto')
 const error = ref<string | null>(null)
 const loading = ref(false)
 const targets = ref<any[]>([])
+const runs = ref<any[]>([])
+const vulns = ref<any[]>([])
 const targetsLoading = ref(false)
+const showForm = ref(false)
 const objective = ref<string>('Find SQLi, XSS, auth bypass, IDOR, and any real reproducible vulnerability. Report each with write_finding and a curl PoC.')
 
-// Authenticated session the agent auto-injects into http_request calls.
-// Most SRC/pentest targets require login to reach the interesting function
-// points, so this is the "give the AI your session" seam.
+// auth section
 const authCookies = ref('')
 const authHeaders = ref('')
 const authNote = ref('')
@@ -28,13 +32,39 @@ const placeholders: Record<string, string> = {
   ip: 'e.g. 10.0.0.1',
 }
 
+const runCounts = computed(() => {
+  const m: Record<string, number> = {}
+  for (const r of runs.value) m[r.target_id] = (m[r.target_id] || 0) + 1
+  return m
+})
+const lastRun = computed(() => {
+  const m: Record<string, any> = {}
+  for (const r of runs.value) {
+    const cur = m[r.target_id]
+    if (!cur || new Date(r.started_at || 0) > new Date(cur.started_at || 0)) m[r.target_id] = r
+  }
+  return m
+})
+const sevByTarget = computed(() => {
+  const m: Record<string, Record<string, number>> = {}
+  for (const v of vulns.value) {
+    if (v.status === 'dismissed') continue
+    const key = v.target_id || ''
+    const t = (m[key] = m[key] || {})
+    t[v.severity?.toLowerCase() || 'info'] = (t[v.severity?.toLowerCase() || 'info'] || 0) + 1
+  }
+  return m
+})
+
 async function loadTargets() {
   targetsLoading.value = true
   try {
-    const res = await api.get('/targets')
-    targets.value = Array.isArray(res.data) ? res.data : res.data?.targets || res.data?.items || []
-  } catch (e) {
-    console.warn('loadTargets', e)
+    const [tRes, rRes, vRes] = await Promise.all([
+      api.get('/targets'), api.get('/runs'), api.get('/vulnerabilities'),
+    ])
+    targets.value = tRes.data?.targets || tRes.data || []
+    runs.value = rRes.data?.runs || rRes.data || []
+    vulns.value = vRes.data?.vulnerabilities || vRes.data || []
   } finally {
     targetsLoading.value = false
   }
@@ -48,31 +78,22 @@ async function start() {
   error.value = null
   loading.value = true
   try {
-    // 1. Create target (server expects {input, type})
-    const tRes = await api.post('/targets', {
-      input: target.value.trim(),
-      type: targetType.value,
-    })
+    const tRes = await api.post('/targets', { input: target.value.trim(), type: targetType.value })
     const targetId = tRes.data?.id
     if (!targetId) throw new Error('No target id returned')
 
-    // 1.5 Attach the authenticated session if the user provided one.
     const cookies = authCookies.value.trim()
     const hasHeaders = authHeaders.value.trim().length > 0
     if (cookies || hasHeaders) {
-      const headers = parseHeaders(authHeaders.value)
       await api.patch(`/targets/${targetId}/auth`, {
-        cookies,
-        headers,
-        note: authNote.value.trim(),
+        cookies, headers: parseHeaders(authHeaders.value), note: authNote.value.trim(),
       })
     }
-
-    // 2. Start run
     const rRes = await api.post('/runs', { target_id: targetId, objective: objective.value })
     const runId = rRes.data?.id || rRes.data?.run_id
     if (!runId) throw new Error('No run id returned')
 
+    resetForm()
     await loadTargets()
     router.push(`/runs/${runId}`)
   } catch (e: any) {
@@ -82,19 +103,21 @@ async function start() {
   }
 }
 
-function viewRuns(t: any) {
-  router.push(`/targets/${t.id}/runs`)
+function resetForm() {
+  target.value = ''
+  authCookies.value = ''
+  authHeaders.value = ''
+  authNote.value = ''
+  showForm.value = false
+  error.value = null
 }
 
-// Parse "Key: value" lines into a header map (for the auth section).
 function parseHeaders(raw: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of raw.split('\n')) {
     const idx = line.indexOf(':')
     if (idx <= 0) continue
-    const k = line.slice(0, idx).trim()
-    const v = line.slice(idx + 1).trim()
-    if (k) out[k] = v
+    out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
   }
   return out
 }
@@ -103,117 +126,111 @@ function hasAuth(t: any): boolean {
   return !!(t?.auth_context && t.auth_context !== '' && t.auth_context !== '{}')
 }
 
+function newRun(t: any) {
+  router.push(`/targets/${t.id}/runs`)
+}
+function viewRuns(t: any) {
+  router.push(`/targets/${t.id}/runs`)
+}
+
 onMounted(loadTargets)
 </script>
 
 <template>
-  <div class="col" style="max-width: 720px">
-    <h2 style="font-size: 18px; font-weight: 500">New Target</h2>
-    <div class="muted" style="font-size: 13px">
-      Enter a company name, domain, URL, or IP to begin an AI-driven reconnaissance and assessment.
+  <div class="col">
+    <div class="eng-head">
+      <div>
+        <h2 style="font-size: 20px; font-weight: 600; margin: 0">Engagements</h2>
+        <div class="muted" style="font-size: 13px; margin-top: 2px">Assets you've authorized the AI to recon and test</div>
+      </div>
+      <UiButton variant="primary" size="md" @click="showForm = !showForm">{{ showForm ? 'Close' : '＋ New engagement' }}</UiButton>
     </div>
 
-    <div class="card col" style="gap: 14px">
-      <div>
-        <div class="muted" style="font-size: 12px; margin-bottom: 4px">Target</div>
-        <input
-          v-model="target"
-          :placeholder="placeholders[targetType]"
-          style="width: 100%"
-          @keyup.enter="start"
-        />
+    <div v-if="showForm" class="card create-form">
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Target</label>
+          <input v-model="target" :placeholder="placeholders[targetType]" style="width: 100%" @keyup.enter="start" />
+        </div>
+        <div>
+          <label class="field-label">Type</label>
+          <select v-model="targetType" style="width: 100%">
+            <option value="auto">Auto-detect</option>
+            <option value="company">Company</option>
+            <option value="domain">Domain</option>
+            <option value="url">URL</option>
+            <option value="ip">IP</option>
+          </select>
+        </div>
       </div>
       <div>
-        <div class="muted" style="font-size: 12px; margin-bottom: 4px">Type</div>
-        <select v-model="targetType" style="width: 200px">
-          <option value="auto">Auto-detect</option>
-          <option value="company">Company</option>
-          <option value="domain">Domain</option>
-          <option value="url">URL</option>
-          <option value="ip">IP</option>
-        </select>
+        <label class="field-label">Objective</label>
+        <textarea v-model="objective" rows="2" style="width: 100%" />
       </div>
-      <div>
-        <div class="muted" style="font-size: 12px; margin-bottom: 4px">Objective (what the AI should look for)</div>
-        <textarea
-          v-model="objective"
-          rows="3"
-          style="width: 100%; font-family: inherit; font-size: 13px"
-        />
-      </div>
-
       <details class="auth-details">
-        <summary style="cursor: pointer; font-size: 13px; color: var(--accent, #3b82f6)">
-          🔐 Authenticated session (optional) — give the AI your login so it can test behind-auth function points
-        </summary>
-        <div class="col" style="gap: 10px; margin-top: 10px; padding-left: 4px">
+        <summary>🔐 Authenticated session (optional) — give the AI your login to test behind-auth function points</summary>
+        <div class="auth-fields">
           <div>
-            <div class="muted" style="font-size: 12px; margin-bottom: 4px">Cookies (paste the whole Cookie header from DevTools, e.g. <code>sessionid=abc; uid=1</code>)</div>
+            <label class="field-label">Cookies (paste the Cookie header, e.g. <code>sessionid=abc; uid=1</code>)</label>
             <textarea v-model="authCookies" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="sessionid=...; " />
           </div>
           <div>
-            <div class="muted" style="font-size: 12px; margin-bottom: 4px">Extra headers (one per line, <code>Key: value</code>)</div>
+            <label class="field-label">Extra headers (<code>Key: value</code> per line)</label>
             <textarea v-model="authHeaders" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="Authorization: Bearer ..." />
           </div>
           <div>
-            <div class="muted" style="font-size: 12px; margin-bottom: 4px">Note to the AI (who is this account / what's its role?)</div>
+            <label class="field-label">Note to the AI (who is this account?)</label>
             <input v-model="authNote" style="width: 100%" placeholder="e.g. normal registered user, role=user" />
-          </div>
-          <div class="muted" style="font-size: 11px">
-            The AI auto-attaches these to requests matching this target's host, and compares anonymous vs authenticated access to hunt IDOR / privilege issues.
           </div>
         </div>
       </details>
-
-      <div v-if="error" style="color: var(--red); font-size: 13px">{{ error }}</div>
+      <div v-if="error" style="color: var(--danger); font-size: 13px">{{ error }}</div>
       <div class="row">
-        <button class="primary" :disabled="loading" @click="start">
-          {{ loading ? 'Starting...' : 'Start' }}
-        </button>
-        <span class="muted" style="font-size: 12px">Or press Enter</span>
+        <UiButton variant="primary" size="lg" :disabled="loading" @click="start">
+          {{ loading ? 'Starting…' : 'Launch assessment' }}
+        </UiButton>
       </div>
     </div>
 
-    <div class="card" style="font-size: 13px">
-      <div style="font-weight: 500; margin-bottom: 8px">What happens next</div>
-      <ol style="padding-left: 20px; color: var(--text-dim); line-height: 1.8">
-        <li>Target is registered and a new run is created</li>
-        <li>AI agent performs reconnaissance (subdomains, ports, tech stack)</li>
-        <li>Selected attack surfaces are probed for vulnerabilities</li>
-        <li>Report and findings are streamed back in real time</li>
-      </ol>
+    <div v-if="targetsLoading" class="muted">Loading…</div>
+    <div v-else-if="targets.length" class="eng-grid">
+      <div v-for="t in targets" :key="t.id" class="eng-card card">
+        <div class="eng-card-head">
+          <span class="pill">{{ t.type || 'auto' }}</span>
+          <span v-if="hasAuth(t)" class="pill confirmed" title="authenticated session configured">🔐 auth</span>
+          <span class="spacer" />
+          <span class="muted" style="font-size: 11px">{{ t.created_at ? new Date(t.created_at).toLocaleDateString() : '' }}</span>
+        </div>
+        <div class="eng-card-value" @click="viewRuns(t)">{{ t.value || t.normalized || t.id }}</div>
+        <div class="eng-card-meta muted">{{ (sevByTarget[t.id] ? Object.entries(sevByTarget[t.id]).map(([s, c]) => `${s} ${c}`).join(' · ') : 'no findings') }}</div>
+        <div class="eng-card-foot">
+          <UiBadge v-if="lastRun[t.id]" kind="status" :value="lastRun[t.id].status" :dot="true" />
+          <span v-else class="muted" style="font-size: 11px">no runs yet</span>
+          <span class="muted" style="font-size: 11px">{{ runCounts[t.id] || 0 }} runs</span>
+          <span class="spacer" />
+          <button class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="newRun(t)">New run</button>
+          <button style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="viewRuns(t)">History</button>
+        </div>
+      </div>
     </div>
-
-    <div class="row" style="margin-top: 8px">
-      <h2 style="font-size: 16px; font-weight: 500">Recent targets</h2>
-      <span class="muted" style="font-size: 12px">· {{ targets.length }} total</span>
-    </div>
-    <div v-if="targetsLoading" class="muted">Loading...</div>
-    <table v-else-if="targets.length" class="card" style="padding: 0">
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Value</th>
-          <th>Created</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="t in targets" :key="t.id">
-          <td><span class="pill">{{ t.type || 'auto' }}</span></td>
-          <td>
-            <code style="font-size: 12px">{{ t.value || t.normalized || t.id }}</code>
-            <span v-if="hasAuth(t)" title="authenticated session configured">🔐</span>
-          </td>
-          <td class="muted" style="font-size: 12px">
-            {{ t.created_at ? new Date(t.created_at).toLocaleString() : '—' }}
-          </td>
-          <td>
-            <button style="font-size: 11px; padding: 2px 8px" @click="viewRuns(t)">View runs</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    <div v-else class="muted">No targets yet.</div>
+    <UiEmpty v-else-if="!targetsLoading" icon="◈" message="No engagements yet — create your first above" />
   </div>
 </template>
+
+<style scoped>
+.eng-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.create-form { display: flex; flex-direction: column; gap: 14px; }
+.form-grid { display: grid; grid-template-columns: 1fr 220px; gap: 12px; }
+.field-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
+.auth-details summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.auth-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+.eng-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.eng-card { display: flex; flex-direction: column; gap: 8px; transition: border-color 0.15s, transform 0.15s; }
+.eng-card:hover { border-color: var(--text-faint); transform: translateY(-1px); }
+.eng-card-head { display: flex; align-items: center; gap: 8px; }
+.eng-card-value { font-size: 14px; font-weight: 600; cursor: pointer; word-break: break-all; }
+.eng-card-value:hover { color: var(--accent); }
+.eng-card-meta { font-size: 12px; }
+.eng-card-foot { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+@media (max-width: 900px) { .form-grid, .auth-fields { grid-template-columns: 1fr; } }
+</style>

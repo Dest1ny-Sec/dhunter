@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import UiButton from '../components/ui/UiButton.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -21,8 +22,7 @@ async function submit() {
   loading.value = true
   try {
     await auth.login(username.value, password.value)
-    const redirect = (route.query.redirect as string) || '/targets'
-    router.push(redirect)
+    router.push((route.query.redirect as string) || '/dashboard')
   } catch (e: any) {
     error.value = e?.response?.data?.error || e?.message || 'Login failed'
   } finally {
@@ -33,25 +33,38 @@ async function submit() {
 
 <template>
   <div class="login-card card">
-    <div class="logo" style="text-align: center; margin-bottom: 16px; font-size: 18px">
-      ⬢ Dhunter
+    <div class="login-brand">
+      <div class="brand-mark">⬢</div>
+      <h1 style="font-size: 22px; font-weight: 700; margin: 0">Dhunter</h1>
     </div>
-    <div class="muted" style="text-align: center; margin-bottom: 20px; font-size: 12px">
-      AI-driven web penetration testing
-    </div>
+    <p class="muted" style="font-size: 13px; text-align: center; margin: 8px 0 22px">
+      AI-driven penetration testing platform
+    </p>
     <form @submit.prevent="submit" class="col">
-      <label>
-        <div class="muted" style="font-size: 12px; margin-bottom: 4px">Username</div>
+      <div>
+        <label class="field-label">Username</label>
         <input v-model="username" autocomplete="username" style="width: 100%" />
-      </label>
-      <label>
-        <div class="muted" style="font-size: 12px; margin-bottom: 4px">Password</div>
+      </div>
+      <div>
+        <label class="field-label">Password</label>
         <input v-model="password" type="password" autocomplete="current-password" style="width: 100%" />
-      </label>
-      <div v-if="error" style="color: var(--red); font-size: 12px">{{ error }}</div>
-      <button type="submit" class="primary" :disabled="loading" style="margin-top: 4px">
-        {{ loading ? 'Signing in...' : 'Sign in' }}
-      </button>
+      </div>
+      <div v-if="error" style="color: var(--danger); font-size: 13px">{{ error }}</div>
+      <UiButton type="submit" variant="primary" size="lg" :disabled="loading" style="margin-top: 6px">
+        {{ loading ? 'Signing in…' : 'Sign in' }}
+      </UiButton>
     </form>
   </div>
 </template>
+
+<style scoped>
+.login-brand { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.brand-mark {
+  width: 52px; height: 52px; border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent-dim), var(--indigo));
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 24px;
+  box-shadow: var(--shadow-glow);
+}
+.field-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
+</style>

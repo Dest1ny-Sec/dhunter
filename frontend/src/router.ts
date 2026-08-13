@@ -10,33 +10,44 @@ const routes = [
   },
   {
     path: '/',
-    redirect: '/targets',
+    redirect: '/dashboard',
+  },
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: () => import('./views/DashboardView.vue'),
+    meta: { title: 'Dashboard' },
   },
   {
     path: '/targets',
     name: 'targets',
     component: () => import('./views/TargetsView.vue'),
+    meta: { title: 'Engagements' },
   },
   {
     path: '/runs',
     name: 'runs',
     component: () => import('./views/RunsView.vue'),
+    meta: { title: 'Runs' },
   },
   {
     path: '/runs/:id',
     name: 'run-detail',
     component: () => import('./views/RunDetailView.vue'),
     props: true,
+    meta: { title: 'Run Detail' },
   },
   {
     path: '/vulns',
     name: 'vulns',
     component: () => import('./views/VulnsView.vue'),
+    meta: { title: 'Vulnerabilities' },
   },
   {
     path: '/settings',
     name: 'settings',
     component: () => import('./views/SettingsView.vue'),
+    meta: { title: 'Settings' },
   },
 ]
 

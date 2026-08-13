@@ -7,13 +7,15 @@ import 'highlight.js/styles/github-dark.css'
 import EventStream, { type SSEEvent } from '../components/EventStream.vue'
 import SeverityBadge from '../components/SeverityBadge.vue'
 import BoardView from '../components/BoardView.vue'
+import UiBadge from '../components/ui/UiBadge.vue'
+import UiProgress from '../components/ui/UiProgress.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 import { api } from '../api/client'
 
 const route = useRoute()
 const runId = computed(() => route.params.id as string)
 
 const tab = ref<'board' | 'stream' | 'report'>('board')
-
 const events = ref<SSEEvent[]>([])
 const runInfo = ref<any>(null)
 const vulns = ref<any[]>([])
@@ -22,10 +24,7 @@ const status = ref<string>('pending')
 const error = ref<string | null>(null)
 const sseRef = ref<EventSource | null>(null)
 
-const md = new Marked({
-  gfm: true,
-  breaks: true,
-})
+const md = new Marked({ gfm: true, breaks: true })
 md.use({
   renderer: {
     code(this: any, code: any) {
@@ -33,13 +32,9 @@ md.use({
       const lang = typeof code === 'object' ? code.lang : undefined
       let highlighted = c
       if (lang && hljs.getLanguage(lang)) {
-        try {
-          highlighted = hljs.highlight(c, { language: lang }).value
-        } catch {}
+        try { highlighted = hljs.highlight(c, { language: lang }).value } catch {}
       } else {
-        try {
-          highlighted = hljs.highlightAuto(c).value
-        } catch {}
+        try { highlighted = hljs.highlightAuto(c).value } catch {}
       }
       return `<pre><code class="hljs">${highlighted}</code></pre>`
     },
@@ -48,11 +43,7 @@ md.use({
 
 const reportHtml = computed(() => {
   if (!report.value) return ''
-  try {
-    return md.parse(report.value) as string
-  } catch {
-    return `<pre>${report.value}</pre>`
-  }
+  try { return md.parse(report.value) as string } catch { return `<pre>${report.value}</pre>` }
 })
 
 const toolCalls = computed(() =>
@@ -60,9 +51,7 @@ const toolCalls = computed(() =>
     .filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
     .map((e, idx, arr) => {
       if (e.type === 'tool_call') {
-        const result = arr.find(
-          (x, j) => j > idx && x.type === 'tool_result' && x.data?.call_id === e.data?.call_id
-        )
+        const result = arr.find((x, j) => j > idx && x.type === 'tool_result' && x.data?.call_id === e.data?.call_id)
         return { call: e, result }
       }
       return null
@@ -70,37 +59,18 @@ const toolCalls = computed(() =>
     .filter(Boolean) as Array<{ call: SSEEvent; result?: SSEEvent }>
 )
 
-const responseText = computed(() =>
-  events.value
-    .filter((e) => e.type === 'response_delta')
-    .map((e) => (typeof e.data === 'string' ? e.data : e.data?.text || ''))
-    .join('')
+const totalTokens = computed(() =>
+  (runInfo.value?.input_tokens || 0) + (runInfo.value?.output_tokens || 0) + (runInfo.value?.cache_read_input_tokens || 0)
 )
-
-function fmtData(d: any): string {
-  if (d == null) return ''
-  if (typeof d === 'string') return d
-  try {
-    return JSON.stringify(d, null, 2)
-  } catch {
-    return String(d)
-  }
-}
-
-function fmtTime(s?: string) {
-  if (!s) return '—'
-  try {
-    return new Date(s).toLocaleString()
-  } catch {
-    return s
-  }
-}
-
-function formatN(n?: number) {
+function fmtN(n?: number): string {
   if (n == null) return '—'
   if (n < 1000) return String(n)
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(2)}M`
+}
+function fmtTime(s?: string) {
+  if (!s) return '—'
+  try { return new Date(s).toLocaleString() } catch { return s }
 }
 
 async function loadRun() {
@@ -109,123 +79,70 @@ async function loadRun() {
     runInfo.value = res.data
     status.value = res.data?.status || 'pending'
   } catch (e: any) {
-    console.warn('loadRun', e)
+    error.value = e?.message || 'failed to load'
   }
-  // Load the vulnerabilities and report (separate endpoints).
   try {
     const [vRes, rRes] = await Promise.all([
       api.get(`/runs/${runId.value}/vulnerabilities`),
       api.get(`/runs/${runId.value}/report`),
     ])
     vulns.value = Array.isArray(vRes.data) ? vRes.data : vRes.data?.vulnerabilities || []
-    if (typeof rRes.data === 'string') {
-      report.value = rRes.data
-    } else if (rRes.data?.report) {
-      report.value = rRes.data.report
-    } else if (rRes.data?.markdown) {
-      report.value = rRes.data.markdown
-    }
-  } catch (e) {
-    // Run still running — vulns/report may be empty
-    console.warn('loadArtifacts', e)
-  }
+    if (typeof rRes.data === 'string') report.value = rRes.data
+    else if (rRes.data?.report) report.value = rRes.data.report
+    else if (rRes.data?.markdown) report.value = rRes.data.markdown
+  } catch {}
 }
 
 function connectSSE() {
-  if (sseRef.value) {
-    sseRef.value.close()
-    sseRef.value = null
-  }
-  // EventSource does not support custom headers, so we pass the token
-  // via the query string — the server's SSE route accepts `?token=`.
+  if (sseRef.value) { sseRef.value.close(); sseRef.value = null }
   const token = localStorage.getItem('dhunter_token') || ''
-  const url = `/api/runs/${runId.value}/events?token=${encodeURIComponent(token)}`
-  const es = new EventSource(url, { withCredentials: false })
+  const es = new EventSource(`/api/runs/${runId.value}/events?token=${encodeURIComponent(token)}`, { withCredentials: false })
   sseRef.value = es
-
   es.onmessage = (msg) => {
     try {
       const parsed = JSON.parse(msg.data)
-      const ev: SSEEvent = {
-        type: parsed.type || parsed.event || 'message',
-        data: parsed.data ?? parsed,
-        ts: parsed.ts || Date.now(),
-      }
+      const ev: SSEEvent = { type: parsed.type || parsed.event || 'message', data: parsed.data ?? parsed, ts: parsed.ts || Date.now() }
       events.value.push(ev)
-
-      // Track status from events
-      if (ev.type === 'run_status' && ev.data?.status) {
-        status.value = ev.data.status
-      }
+      if (ev.type === 'run_status' && ev.data?.status) status.value = ev.data.status
       if (ev.type === 'run_complete' || ev.type === 'run_finished') {
         status.value = 'completed'
         if (typeof ev.data === 'object' && ev.data?.report) report.value = ev.data.report
         if (Array.isArray(ev.data?.vulns)) vulns.value = ev.data.vulns
       }
-      if (ev.type === 'run_failed' || ev.type === 'error') {
-        status.value = 'failed'
+      if (ev.type === 'run_failed' || ev.type === 'error') status.value = 'failed'
+      if (ev.type === 'vulnerability' || ev.type === 'vuln') vulns.value.push(ev.data)
+      if (ev.type === 'report_delta') {
+        const d = ev.data
+        report.value += typeof d === 'string' ? d : d?.delta || ''
       }
-      if (ev.type === 'vulnerability' || ev.type === 'vuln') {
-        vulns.value.push(ev.data)
-      }
-      if (ev.type === 'report_delta' && typeof ev.data === 'string') {
-        report.value += ev.data
-      } else if (ev.type === 'report_delta' && typeof ev.data === 'object' && ev.data?.delta) {
-        report.value += ev.data.delta
-      }
-    } catch (e) {
-      console.warn('SSE parse error', e, msg.data)
-    }
-  }
-
-  es.onerror = () => {
-    // EventSource will auto-reconnect on transient errors
-    // On terminal states, server closes connection
+    } catch {}
   }
 }
 
-onMounted(async () => {
-  await loadRun()
-  connectSSE()
-})
-
-onBeforeUnmount(() => {
-  if (sseRef.value) {
-    sseRef.value.close()
-    sseRef.value = null
-  }
-})
-
+onMounted(async () => { await loadRun(); connectSSE() })
+onBeforeUnmount(() => { if (sseRef.value) { sseRef.value.close(); sseRef.value = null } })
 watch(runId, async (v) => {
-  if (v) {
-    events.value = []
-    vulns.value = []
-    report.value = ''
-    await loadRun()
-    connectSSE()
-  }
+  if (v) { events.value = []; vulns.value = []; report.value = ''; await loadRun(); connectSSE() }
 })
 </script>
 
 <template>
   <div class="col" style="height: 100%">
-    <div class="row">
-      <h2 style="font-size: 16px; font-weight: 500">
-        Run <code>{{ runId.slice(0, 8) }}</code>
-      </h2>
-      <span class="pill" :class="status">{{ status }}</span>
-      <div class="spacer" />
-      <span v-if="runInfo" class="muted" style="font-size: 12px; display: flex; gap: 12px">
-        <span title="input tokens">in {{ formatN(runInfo.input_tokens) }}</span>
-        <span title="output tokens">out {{ formatN(runInfo.output_tokens) }}</span>
-        <span title="cache read">cache {{ formatN(runInfo.cache_read_input_tokens) }}</span>
-      </span>
-      <span class="muted" style="font-size: 12px">
-        {{ events.length }} events
-      </span>
+    <div class="run-head">
+      <div class="row">
+        <h2 style="font-size: 16px; font-weight: 600; margin: 0">Run <code>{{ runId.slice(0, 8) }}</code></h2>
+        <UiBadge kind="status" :value="status" :dot="true" />
+      </div>
+      <div class="run-tokens">
+        <UiProgress v-if="totalTokens > 0" :value="totalTokens" :max="Math.max(totalTokens, 1)" tone="accent" label="tokens" />
+        <span class="muted" style="font-size: 12px">
+          in {{ fmtN(runInfo?.input_tokens) }} · out {{ fmtN(runInfo?.output_tokens) }} · cache {{ fmtN(runInfo?.cache_read_input_tokens) }}
+        </span>
+      </div>
+      <span class="muted" style="font-size: 12px">{{ events.length }} events</span>
     </div>
 
-    <div v-if="error" style="color: var(--red)">{{ error }}</div>
+    <div v-if="error" style="color: var(--danger)">{{ error }}</div>
 
     <div class="tabs">
       <button :class="['tab', { active: tab === 'board' }]" @click="tab = 'board'">Attack Graph</button>
@@ -233,10 +150,8 @@ watch(runId, async (v) => {
       <button :class="['tab', { active: tab === 'report' }]" @click="tab = 'report'">Report</button>
     </div>
 
-    <div v-if="tab === 'board'" class="run-pane" style="flex: 1">
-      <div class="run-pane-body" style="padding: 0">
-        <BoardView :run-id="runId" />
-      </div>
+    <div v-if="tab === 'board'" class="card" style="flex: 1; padding: 14px">
+      <BoardView :run-id="runId" />
     </div>
 
     <div v-if="tab === 'stream' && (status === 'running' || status === 'pending' || events.length > 0)" class="run-panes">
@@ -253,98 +168,58 @@ watch(runId, async (v) => {
         </div>
       </div>
       <div class="run-pane">
-        <div class="run-pane-header">Tool Calls ({{ toolCalls.length }})</div>
+        <div class="run-pane-header">Tool calls ({{ toolCalls.length }})</div>
         <div class="run-pane-body">
           <table v-if="toolCalls.length > 0">
-            <thead>
-              <tr>
-                <th>Tool</th>
-                <th>Status</th>
-                <th>Time</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Tool</th><th>Status</th><th>Time</th></tr></thead>
             <tbody>
               <tr v-for="(tc, i) in toolCalls" :key="i">
+                <td><code style="font-size: 11px">{{ tc.call.data?.name || tc.call.data?.tool || '?' }}</code></td>
                 <td>
-                  <code>{{ tc.call.data?.name || tc.call.data?.tool || '?' }}</code>
-                </td>
-                <td>
-                  <span v-if="tc.result" :style="{ color: tc.result.data?.is_error ? 'var(--red)' : 'var(--green)' }">
+                  <span v-if="tc.result" :style="{ color: tc.result.data?.is_error ? 'var(--danger)' : 'var(--ok)' }">
                     {{ tc.result.data?.is_error ? 'error' : 'ok' }}
                   </span>
                   <span v-else class="muted">pending</span>
                 </td>
-                <td class="muted" style="font-size: 11px">
-                  {{ tc.call.ts ? new Date(tc.call.ts).toLocaleTimeString() : '—' }}
-                </td>
+                <td class="muted" style="font-size: 11px">{{ tc.call.ts ? new Date(tc.call.ts).toLocaleTimeString() : '—' }}</td>
               </tr>
             </tbody>
           </table>
-          <div v-else class="muted" style="padding: 12px; text-align: center; font-size: 12px">
-            No tool calls yet
-          </div>
+          <div v-else class="muted" style="padding: 12px; text-align: center; font-size: 12px">No tool calls yet</div>
         </div>
       </div>
     </div>
+    <UiEmpty v-else-if="tab === 'stream'" icon="⟳" message="Stream will appear when the agent runs" />
 
-    <div v-if="tab === 'report' && (status === 'completed' || status === 'failed')" class="col" style="margin-top: 16px">
+    <div v-if="tab === 'report'" class="col" style="margin-top: 8px">
       <div class="row">
-        <h3 style="font-size: 14px; font-weight: 500">Report</h3>
-        <div class="spacer" />
-        <span class="muted" style="font-size: 12px">
-          {{ runInfo?.finished_at ? `finished ${fmtTime(runInfo.finished_at)}` : '' }}
-        </span>
+        <h3 style="font-size: 14px; font-weight: 600">Report</h3>
+        <span class="spacer" />
+        <span class="muted" style="font-size: 12px">{{ runInfo?.finished_at ? `finished ${fmtTime(runInfo.finished_at)}` : '' }}</span>
       </div>
-      <div class="card markdown" v-if="report">
-        <div v-html="reportHtml" />
-      </div>
-      <div v-else class="muted">No report available.</div>
+      <div class="card markdown" v-if="report"><div v-html="reportHtml" /></div>
+      <UiEmpty v-else icon="📄" message="No report available yet" />
 
-      <h3 style="font-size: 14px; font-weight: 500; margin-top: 16px">Vulnerabilities ({{ vulns.length }})</h3>
-      <table v-if="vulns.length > 0" class="card" style="padding: 0">
-        <thead>
-          <tr>
-            <th>Severity</th>
-            <th>Title</th>
-            <th>Target</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(v, i) in vulns" :key="i">
-            <td><SeverityBadge :severity="v.severity || 'info'" /></td>
-            <td>{{ v.title || v.name || v.id }}</td>
-            <td class="muted"><code>{{ v.target || v.url || v.affected || '—' }}</code></td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-else class="muted">No vulnerabilities found.</div>
+      <h3 style="font-size: 14px; font-weight: 600; margin-top: 12px">Vulnerabilities ({{ vulns.length }})</h3>
+      <div v-if="vulns.length" class="card" style="padding: 0">
+        <table>
+          <thead><tr><th>Severity</th><th>Title</th><th>Target</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr v-for="v in vulns" :key="v.id">
+              <td><SeverityBadge :severity="v.severity || 'info'" /></td>
+              <td>{{ v.title || v.name || v.id }}</td>
+              <td class="muted"><code style="font-size: 11px">{{ v.target || v.url || '—' }}</code></td>
+              <td><UiBadge kind="status" :value="v.status || 'open'" /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <UiEmpty v-else icon="⚑" message="No vulnerabilities found" />
     </div>
   </div>
 </template>
 
 <style scoped>
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--border, #2a2e3a);
-  padding-bottom: 6px;
-}
-.tab {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--muted, #888);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.tab:hover {
-  color: var(--text, #e5e7eb);
-}
-.tab.active {
-  color: var(--accent, #3b82f6);
-  border-color: var(--accent, #3b82f6);
-  background: rgba(59, 130, 246, 0.08);
-}
+.run-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.run-tokens { display: flex; align-items: center; gap: 12px; min-width: 280px; flex: 1; }
 </style>

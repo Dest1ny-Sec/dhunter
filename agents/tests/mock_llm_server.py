@@ -116,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 events = _text_block(0, EXPLORE_TEXT + " No further findings in this direction.")
                 events += _tail("end_turn", 20)
-        elif "verification reviewer" in first:
+        elif "triage reviewer" in first or "verification reviewer" in first:
             events = _text_block(0, VERIFY_TEXT)
             events += _tail("end_turn", 10)
         else:

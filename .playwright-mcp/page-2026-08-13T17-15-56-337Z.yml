@@ -1,0 +1,11 @@
+- generic [ref=e4]:
+  - generic [ref=e5]: ⬢ Dhunter
+  - generic [ref=e6]: AI-driven web penetration testing
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]: Username
+      - textbox "Username" [ref=e10]
+    - generic [ref=e11]:
+      - generic [ref=e12]: Password
+      - textbox "Password" [ref=e13]
+    - button "Sign in" [ref=e14] [cursor=pointer]

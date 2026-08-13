@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineComponent, h, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
+import { VueFlow, useVueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
+import dagre from 'dagre'
 import { api } from '../api/client'
 
 const props = defineProps<{ runId: string }>()
 
-interface Fact { id: string; run_id: string; description: string; source: string; created_at: string }
-interface Intent { id: string; run_id: string; from: string[]; description: string; status: string; worker?: string | null; to_fact_id?: string | null }
-interface Hint { id: string; content: string; creator: string; created_at: string }
-
-const facts = ref<Fact[]>([])
-const intents = ref<Intent[]>([])
-const hints = ref<Hint[]>([])
-const loading = ref(false)
+const facts = ref<any[]>([])
+const intents = ref<any[]>([])
+const hints = ref<any[]>([])
+const loading = ref(true)
+const selected = ref<any>(null)
 const hintText = ref('')
 const hintMsg = ref('')
-
 let timer: number | null = null
 
+// ---------- data ----------
 async function load() {
   try {
     const res = await api.get(`/runs/${props.runId}/graph`)
@@ -24,7 +26,7 @@ async function load() {
     intents.value = res.data?.intents || []
     hints.value = res.data?.hints || []
     loading.value = false
-  } catch (e) {
+  } catch {
     loading.value = true
   }
 }
@@ -50,131 +52,172 @@ onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer)
 })
 
-// --- graph layout (simple layered SVG, no external deps) ---
-const statusLabel: Record<string, string> = {
-  open: 'open',
-  claimed: 'claiming…',
-  concluded: 'done',
-  failed: 'dead end',
-}
+// ---------- node components ----------
+const FactNode = markRaw(
+  defineComponent({
+    props: ['id', 'data'],
+    setup(props) {
+      return () => {
+        const src = (props.data as any)?.source || 'agent'
+        return h('div', { class: ['vf-node', `fact-${src}`], 'data-id': props.id }, [
+          h('div', { class: 'vf-id' }, String(props.id).slice(0, 10)),
+          h('div', { class: 'vf-desc' }, String((props.data as any)?.description || '').slice(0, 90)),
+          h('div', { class: 'vf-src' }, src),
+        ])
+      }
+    },
+  }),
+)
 
-const nodeW = 180
-const nodeH = 56
-const cols = 3
-const colW = 220
-const rowH = 130
+const IntentNode = markRaw(
+  defineComponent({
+    props: ['id', 'data'],
+    setup(props) {
+      return () => {
+        const d = props.data as any
+        const status = d?.status || 'open'
+        return h('div', { class: ['vf-node', 'intent-node', `intent-${status}`], 'data-id': props.id }, [
+          h('div', { class: 'vf-status' }, status),
+          h('div', { class: 'vf-desc' }, String(d?.description || '').slice(0, 90)),
+          h('div', { class: 'vf-src' }, d?.worker ? `worker ${d.worker}` : 'unclaimed'),
+        ])
+      }
+    },
+  }),
+)
 
-interface Pos { x: number; y: number }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const nodeTypes: any = { fact: FactNode, intent: IntentNode }
 
-const factPos = computed<Record<string, Pos>>(() => {
-  const pos: Record<string, Pos> = {}
-  facts.value.forEach((f, i) => {
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    pos[f.id] = { x: 40 + col * colW, y: 20 + row * rowH }
-  })
-  return pos
+// ---------- graph build + layout ----------
+interface VNode { id: string; type: string; position: { x: number; y: number }; data: Record<string, any> }
+interface VEdge { id: string; source: string; target: string; label?: string; animated?: boolean; style?: Record<string, any> }
+
+const { fitView } = useVueFlow()
+
+const nodes = computed<VNode[]>(() => {
+  const factNodes: VNode[] = facts.value.map((f) => ({
+    id: f.id,
+    type: 'fact',
+    position: { x: 0, y: 0 },
+    data: { description: f.description, source: f.source },
+  }))
+  const intentNodes: VNode[] = intents.value.map((it) => ({
+    id: `intent:${it.id}`,
+    type: 'intent',
+    position: { x: 0, y: 0 },
+    data: { description: it.description, status: it.status, worker: it.worker },
+  }))
+  return layout(factNodes, intentNodes)
 })
 
-interface Edge { x1: number; y1: number; x2: number; y2: number; midY: number; intent: Intent; open: boolean }
-
-const edges = computed<Edge[]>(() => {
-  const out: Edge[] = []
+const edges = computed<VEdge[]>(() => {
+  const out: VEdge[] = []
   for (const it of intents.value) {
-    const from = (it.from || []).filter((id) => factPos.value[id])
-    const target = it.to_fact_id && factPos.value[it.to_fact_id] ? factPos.value[it.to_fact_id] : null
-    for (const fid of from.length ? from : [facts.value[0]?.id]) {
-      if (!fid || !factPos.value[fid]) continue
-      const a = factPos.value[fid]
-      const b = target || a // open intent: draw a stub
-      const midY = (a.y + b.y) / 2 + nodeH / 2
+    const intentNodeId = `intent:${it.id}`
+    const from = (it.from || []).filter((id: string) => facts.value.some((f) => f.id === id))
+    const sources = from.length ? from : facts.value.filter((f) => f.source === 'origin').map((f) => f.id)
+    for (const s of sources) {
       out.push({
-        x1: a.x + nodeW / 2,
-        y1: a.y + nodeH,
-        x2: target ? b.x + nodeW / 2 : b.x + nodeW / 2,
-        y2: target ? b.y : b.y,
-        intent: it,
-        open: !target,
-        midY,
+        id: `e-${it.id}-${s}`,
+        source: s,
+        target: intentNodeId,
+        animated: it.status === 'claimed',
+        style: it.status === 'failed' ? { stroke: 'var(--text-faint)', strokeDasharray: '4 3' } : undefined,
+      })
+    }
+    if (it.to_fact_id) {
+      out.push({
+        id: `e2-${it.id}`,
+        source: intentNodeId,
+        target: it.to_fact_id,
+        label: '→',
       })
     }
   }
   return out
 })
 
-const graphHeight = computed(() => Math.max(120, Math.ceil(facts.value.length / cols) * rowH + 40))
-
-function nodeColor(source: string) {
-  if (source === 'origin') return 'var(--green, #22c55e)'
-  if (source === 'goal') return 'var(--red, #ef4444)'
-  return 'var(--accent, #3b82f6)'
+function layout(factNodes: VNode[], intentNodes: VNode[]): VNode[] {
+  const all = [...factNodes, ...intentNodes]
+  if (all.length === 0) return []
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 70, marginx: 20, marginy: 20 })
+  g.setDefaultEdgeLabel(() => ({}))
+  for (const n of all) g.setNode(n.id, { width: 210, height: n.type === 'intent' ? 88 : 78 })
+  for (const e of edges.value) g.setEdge(e.source, e.target)
+  dagre.layout(g)
+  return all.map((n) => {
+    const pos = g.node(n.id)
+    return { ...n, position: { x: pos.x - 105, y: pos.y - (n.type === 'intent' ? 44 : 39) } }
+  })
 }
+
+function onNodeClick({ node }: any) {
+  if (node.type === 'fact') {
+    const f = facts.value.find((x) => x.id === node.id)
+    selected.value = { kind: 'fact', data: f }
+  } else {
+    const it = intents.value.find((x) => x.id === node.id.replace('intent:', ''))
+    selected.value = { kind: 'intent', data: it }
+  }
+}
+
+const statusLabel: Record<string, string> = { open: 'open', claimed: 'working…', concluded: 'done', failed: 'dead end' }
 </script>
 
 <template>
   <div class="board">
-    <div class="board-header">
-      <strong>Attack Graph</strong>
-      <span class="muted" style="font-size: 11px">
-        {{ facts.length }} facts · {{ intents.length }} intents · {{ hints.length }} hints
-        <span v-if="loading">(backend starting…)</span>
-      </span>
-    </div>
-
-    <!-- causality graph -->
-    <div v-if="facts.length > 0" class="graph-wrap">
-      <svg :width="40 + cols * colW" :height="graphHeight">
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" :fill="'var(--border, #555)'" />
-          </marker>
-        </defs>
-        <!-- edges -->
-        <g v-for="(e, i) in edges" :key="'e' + i">
-          <line :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" :stroke="'var(--border, #555)'"
-                :stroke-width="e.open ? 1.5 : 2" :stroke-dasharray="e.open ? '4 3' : undefined"
-                marker-end="url(#arrow)" />
-          <!-- open intent label -->
-          <g v-if="e.open" transform="translate(0, 0)">
-            <rect :x="e.x1 - 60" :y="e.midY - 18" width="170" height="30" rx="6"
-                  :fill="e.intent.status === 'claimed' ? '#3b2f0a' : '#1f2430'" stroke="#8a6d1a" stroke-dasharray="3 2" />
-            <text :x="e.x1 + 25" :y="e.midY - 3" font-size="9" fill="#d8b45a"
-                  :text-anchor="'middle'">{{ e.intent.status === 'claimed' ? '⏳' : '▸' }} {{ e.intent.description.slice(0, 22) }}</text>
-          </g>
-        </g>
-        <!-- fact nodes -->
-        <g v-for="(f, i) in facts" :key="f.id" :transform="`translate(${factPos[f.id].x}, ${factPos[f.id].y})`">
-          <rect width="180" height="56" rx="8" :fill="nodeColor(f.source)" fill-opacity="0.12"
-                :stroke="nodeColor(f.source)" stroke-width="1.5" />
-          <text x="8" y="18" font-size="9" :fill="nodeColor(f.source)">{{ f.id.slice(0, 12) }}</text>
-          <text x="8" y="36" font-size="10" fill="var(--text, #e5e7eb)">{{ f.description.slice(0, 46) }}</text>
-          <text x="8" y="50" font-size="8" fill="var(--muted, #888)">{{ f.source }}</text>
-        </g>
-      </svg>
-    </div>
-    <div v-else class="muted" style="padding: 12px; font-size: 12px">No facts yet — the agent is starting up.</div>
-
-    <!-- intent list -->
-    <div class="board-list">
-      <div class="board-subhead">Intents</div>
-      <div v-if="intents.length" class="intent-row" v-for="it in intents" :key="it.id">
-        <span class="pill small" :class="it.status">{{ statusLabel[it.status] || it.status }}</span>
-        <span class="intent-desc">{{ it.description }}</span>
-        <span v-if="it.worker" class="muted" style="font-size: 10px">{{ it.worker }}</span>
+    <div class="board-head">
+      <div class="board-title">
+        <strong>Attack Graph</strong>
+        <span class="muted" style="font-size: 11px">{{ facts.length }} facts · {{ intents.length }} intents · {{ hints.length }} hints</span>
       </div>
-      <div v-else class="muted" style="font-size: 12px">No intents yet — the planner will propose directions soon.</div>
+      <button v-if="nodes.length" class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="() => fitView()">Fit view</button>
     </div>
 
-    <!-- hints -->
-    <div class="board-list">
-      <div class="board-subhead">Hints (inject guidance)</div>
-      <div class="hint-row" v-for="h in hints" :key="h.id">
-        <span class="muted" style="font-size: 10px">{{ h.creator }}</span>
-        <span>{{ h.content }}</span>
+    <div class="graph-wrap">
+      <VueFlow
+        v-if="nodes.length"
+        :nodes="nodes"
+        :edges="edges"
+        :node-types="nodeTypes"
+        :min-zoom="0.1"
+        :max-zoom="2"
+        @node-click="onNodeClick"
+      >
+        <Background :gap="20" pattern-color="#1a1e3a" />
+        <Controls position="bottom-left" />
+        <MiniMap position="bottom-right" :pane-color="'#0c0e1a'" :node-color="'#7c66ff'" :mask-color="'rgba(6,7,13,0.7)'" />
+      </VueFlow>
+      <div v-else class="graph-empty muted">No facts yet — the agent is starting up.</div>
+    </div>
+
+    <!-- detail panel -->
+    <div v-if="selected" class="detail-panel">
+      <div class="detail-head">
+        <span class="pill small" :class="selected.kind === 'fact' ? 'confirmed' : (selected.data?.status || 'open')">
+          {{ selected.kind === 'fact' ? 'fact' : statusLabel[selected.data?.status] || selected.data?.status }}
+        </span>
+        <button class="ghost" style="min-height: 24px; padding: 0 6px" @click="selected = null">✕</button>
       </div>
+      <div v-if="selected.kind === 'fact'">
+        <div class="detail-desc">{{ selected.data?.description }}</div>
+        <div class="muted" style="font-size: 11px; margin-top: 6px">source: {{ selected.data?.source }} · {{ selected.data?.id }}</div>
+      </div>
+      <div v-else>
+        <div class="detail-desc">{{ selected.data?.description }}</div>
+        <div class="muted" style="font-size: 11px; margin-top: 6px">
+          {{ selected.data?.worker ? `worker: ${selected.data.worker}` : 'unclaimed' }} · {{ selected.data?.id }}
+        </div>
+      </div>
+    </div>
+
+    <div class="hint-block">
+      <div class="muted" style="font-size: 11px">Hints (inject guidance the AI reads next turn)</div>
       <div class="hint-input">
         <input v-model="hintText" placeholder="e.g. try /actuator/env, use admin/admin creds…" @keyup.enter="sendHint" />
-        <button @click="sendHint">Send</button>
+        <button class="primary" style="min-height: 34px" @click="sendHint">Send</button>
         <span v-if="hintMsg" class="muted" style="font-size: 11px">{{ hintMsg }}</span>
       </div>
     </div>
@@ -182,77 +225,65 @@ function nodeColor(source: string) {
 </template>
 
 <style scoped>
-.board {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: 100%;
-  overflow-y: auto;
-  padding: 12px;
-}
-.board-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
+.board { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 400px; }
+.board-head { display: flex; justify-content: space-between; align-items: center; }
+.board-title { display: flex; align-items: baseline; gap: 10px; }
 .graph-wrap {
-  overflow-x: auto;
-  background: var(--bg, #12141a);
-  border: 1px solid var(--border, #2a2e3a);
-  border-radius: 8px;
-  padding: 8px;
-}
-.board-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.board-subhead {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted, #888);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-.intent-row,
-.hint-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  padding: 4px 6px;
-  background: var(--bg, #12141a);
-  border-radius: 6px;
-}
-.intent-desc {
   flex: 1;
-  color: var(--text, #e5e7eb);
+  height: 460px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
 }
-.pill.small {
-  font-size: 10px;
-  padding: 1px 6px;
+.graph-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
 }
-.hint-input {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+.detail-panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
 }
-.hint-input input {
-  flex: 1;
-  background: var(--bg, #12141a);
-  border: 1px solid var(--border, #2a2e3a);
-  border-radius: 6px;
-  padding: 6px 8px;
-  color: var(--text, #e5e7eb);
-  font-size: 12px;
-}
-.hint-input button {
-  background: var(--accent, #3b82f6);
-  border: none;
-  color: white;
-  border-radius: 6px;
-  padding: 6px 12px;
+.detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.detail-desc { font-size: 13px; line-height: 1.5; }
+.hint-block { display: flex; flex-direction: column; gap: 6px; }
+.hint-input { display: flex; gap: 8px; align-items: center; }
+.hint-input input { flex: 1; }
+</style>
+
+<style>
+/* Vue Flow node styling (global so node components can use tokens) */
+.vf-node {
+  width: 210px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
   font-size: 12px;
   cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
+.vf-node:hover { border-color: var(--accent); box-shadow: var(--shadow-glow); }
+.vf-id { font-size: 9px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; margin-bottom: 4px; }
+.vf-desc { color: var(--text); line-height: 1.35; word-break: break-word; }
+.vf-src { font-size: 9px; color: var(--text-faint); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.fact-origin { border-color: rgba(6, 182, 212, 0.6); background: rgba(6, 182, 212, 0.08); }
+.fact-goal { border-color: rgba(239, 68, 68, 0.6); background: rgba(239, 68, 68, 0.08); }
+.fact-agent, .fact-intent { border-color: rgba(124, 102, 255, 0.5); background: rgba(124, 102, 255, 0.06); }
+.fact-origin .vf-id { color: var(--cyan); }
+.fact-goal .vf-id { color: var(--danger); }
+
+.intent-node { border-style: dashed; background: rgba(245, 158, 11, 0.05); }
+.vf-status { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; color: var(--warn); }
+.intent-claimed { border-color: rgba(124, 102, 255, 0.7); }
+.intent-claimed .vf-status { color: var(--accent); }
+.intent-concluded { border-color: rgba(16, 185, 129, 0.5); }
+.intent-concluded .vf-status { color: var(--ok); }
+.intent-failed { border-color: var(--text-faint); opacity: 0.7; }
+.intent-failed .vf-status { color: var(--text-faint); }
 </style>

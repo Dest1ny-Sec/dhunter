@@ -1,0 +1,63 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - generic [ref=f2e5]: ⬢ Dhunter
+    - generic [ref=f2e6]:
+      - text: admin
+      - button "Logout" [ref=f2e7] [cursor=pointer]
+  - navigation [ref=f2e8]:
+    - generic [ref=f2e9]: Workspace
+    - link "Targets" [ref=f2e10] [cursor=pointer]:
+      - /url: /targets
+    - link "Runs" [ref=f2e11] [cursor=pointer]:
+      - /url: /runs
+    - link "Vulnerabilities" [ref=f2e12] [cursor=pointer]:
+      - /url: /vulns
+    - link "Settings" [ref=f2e13] [cursor=pointer]:
+      - /url: /settings
+  - main [ref=f2e14]:
+    - generic [ref=f2e15]:
+      - generic [ref=f2e16]:
+        - heading "Vulnerabilities" [level=2] [ref=f2e17]
+        - button "Refresh" [ref=f2e18] [cursor=pointer]
+      - generic [ref=f2e19]:
+        - generic [ref=f2e20]:
+          - generic [ref=f2e21]: "Severity:"
+          - combobox "Severity:" [ref=f2e22]:
+            - option "All" [selected]
+            - option "critical"
+            - option "high"
+            - option "medium"
+            - option "low"
+            - option "info"
+        - generic [ref=f2e23]:
+          - generic [ref=f2e24]: "Run:"
+          - combobox "Run:" [ref=f2e25]:
+            - option "All" [selected]
+            - option "41c351af"
+            - option "89643f39"
+        - generic [ref=f2e26]: 2 / 2
+      - table [ref=f2e27]:
+        - rowgroup [ref=f2e28]:
+          - row [ref=f2e29]:
+            - columnheader "Severity" [ref=f2e30]
+            - columnheader "Title" [ref=f2e31]
+            - columnheader "Target" [ref=f2e32]
+            - columnheader "Status" [ref=f2e33]
+            - columnheader "Evidence" [ref=f2e34]
+        - rowgroup [ref=f2e35]:
+          - row [ref=f2e36]:
+            - cell "critical" [ref=f2e37]
+            - cell "SQL Injection in login (UNION-based auth bypass)" [ref=f2e39]
+            - cell [ref=f2e41]:
+              - code [ref=f2e42]: http://example.com/rest/user/login
+            - cell "confirmed" [ref=f2e43]
+            - cell [ref=f2e45]:
+              - button "Show" [ref=f2e46] [cursor=pointer]
+          - row [ref=f2e47]:
+            - cell "critical" [ref=f2e48]
+            - cell "SQL Injection in login (UNION-based auth bypass)" [ref=f2e50]
+            - cell [ref=f2e52]:
+              - code [ref=f2e53]: http://example.com/rest/user/login
+            - cell "dismissed" [ref=f2e54]
+            - cell [ref=f2e56]:
+              - button "Show" [ref=f2e57] [cursor=pointer]

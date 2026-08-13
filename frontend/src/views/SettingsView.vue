@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api } from '../api/client'
+import UiCard from '../components/ui/UiCard.vue'
+import UiBadge from '../components/ui/UiBadge.vue'
 
 const STORAGE_KEY = 'dhunter_settings_v1'
 
@@ -15,13 +16,13 @@ interface Settings {
 }
 
 const settings = ref<Settings>({
-  llm_provider: 'openai',
-  llm_model: 'gpt-4o',
+  llm_provider: 'anthropic',
+  llm_model: '',
   llm_base_url: '',
   llm_api_key: '',
-  mcp_url: 'http://127.0.0.1:9090',
+  mcp_url: 'http://127.0.0.1:9124',
   mcp_token: '',
-  agent_url: 'http://127.0.0.1:8081',
+  agent_url: 'http://127.0.0.1:9100',
 })
 
 const mcpStatus = ref<'unknown' | 'connected' | 'disconnected' | 'checking'>('unknown')
@@ -52,109 +53,82 @@ function save() {
 async function testMCP() {
   mcpStatus.value = 'checking'
   try {
-    const res = await api.get('/api/tools/mcp/health', { timeout: 5000 }).catch(() => null)
-    if (res && res.status >= 200 && res.status < 300) {
-      mcpStatus.value = 'connected'
-    } else {
-      // Fallback: try direct fetch
-      const ok = await fetch(settings.value.mcp_url + '/health', { method: 'GET' }).then(
-        (r) => r.ok,
-        () => false
-      )
-      mcpStatus.value = ok ? 'connected' : 'disconnected'
-    }
+    const ok = await fetch(settings.value.mcp_url + '/health', { method: 'GET' }).then((r) => r.ok, () => false)
+    mcpStatus.value = ok ? 'connected' : 'disconnected'
   } catch {
     mcpStatus.value = 'disconnected'
   }
 }
 
-const statusLabel = {
-  unknown: '—',
-  connected: 'connected',
-  disconnected: 'disconnected',
-  checking: 'checking...',
-} as const
-
-const statusColor = {
-  unknown: 'var(--text-dim)',
-  connected: 'var(--green)',
-  disconnected: 'var(--red)',
-  checking: 'var(--accent)',
-} as const
-
-onMounted(() => {
-  load()
-})
+onMounted(load)
 </script>
 
 <template>
   <div class="col" style="max-width: 720px">
-    <h2 style="font-size: 18px; font-weight: 500">Settings</h2>
-    <div class="muted" style="font-size: 13px">
-      Configuration is stored in browser local storage for the MVP. Backend persistence coming later.
-    </div>
+    <h2 style="font-size: 20px; font-weight: 600; margin: 0">Settings</h2>
+    <div class="muted" style="font-size: 13px">Platform connections — stored locally for now</div>
 
-    <div class="card col">
-      <div style="font-weight: 500">LLM</div>
-      <div class="row" style="gap: 12px">
-        <label class="col" style="flex: 1; gap: 4px">
-          <span class="muted" style="font-size: 12px">Provider</span>
-          <select v-model="settings.llm_provider">
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="azure">Azure OpenAI</option>
-            <option value="ollama">Ollama</option>
+    <UiCard title="LLM provider">
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Provider</label>
+          <select v-model="settings.llm_provider" style="width: 100%">
+            <option value="anthropic">Anthropic-compatible</option>
+            <option value="openai">OpenAI-compatible</option>
             <option value="custom">Custom</option>
           </select>
-        </label>
-        <label class="col" style="flex: 1; gap: 4px">
-          <span class="muted" style="font-size: 12px">Model</span>
-          <input v-model="settings.llm_model" />
-        </label>
+        </div>
+        <div>
+          <label class="field-label">Model</label>
+          <input v-model="settings.llm_model" placeholder="e.g. MiniMax-M3[1M]" style="width: 100%" />
+        </div>
       </div>
-      <label class="col" style="gap: 4px">
-        <span class="muted" style="font-size: 12px">Base URL (optional)</span>
-        <input v-model="settings.llm_base_url" placeholder="https://api.openai.com/v1" />
-      </label>
-      <label class="col" style="gap: 4px">
-        <span class="muted" style="font-size: 12px">API Key</span>
-        <input v-model="settings.llm_api_key" type="password" placeholder="sk-..." />
-      </label>
-    </div>
+      <div>
+        <label class="field-label">Base URL</label>
+        <input v-model="settings.llm_base_url" placeholder="https://api.minimaxi.com/anthropic" style="width: 100%" />
+      </div>
+      <div>
+        <label class="field-label">API key (stored locally)</label>
+        <input v-model="settings.llm_api_key" type="password" placeholder="sk-..." style="width: 100%" />
+      </div>
+    </UiCard>
 
-    <div class="card col">
+    <UiCard title="MCP toolbelt">
       <div class="row">
-        <div style="font-weight: 500">MCP Tools — MCP Tools</div>
         <div class="spacer" />
-        <span class="pill" :style="{ color: statusColor[mcpStatus], borderColor: statusColor[mcpStatus] }">
-          {{ statusLabel[mcpStatus] }}
-        </span>
+        <UiBadge kind="status" :value="mcpStatus" :dot="true" />
       </div>
-      <label class="col" style="gap: 4px">
-        <span class="muted" style="font-size: 12px">MCP Tools URL</span>
-        <input v-model="settings.mcp_url" />
-      </label>
-      <label class="col" style="gap: 4px">
-        <span class="muted" style="font-size: 12px">Token</span>
-        <input v-model="settings.mcp_token" type="password" />
-      </label>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">MCP URL</label>
+          <input v-model="settings.mcp_url" style="width: 100%" />
+        </div>
+        <div>
+          <label class="field-label">Token</label>
+          <input v-model="settings.mcp_token" type="password" style="width: 100%" />
+        </div>
+      </div>
       <div>
         <button @click="testMCP">Test connection</button>
       </div>
-    </div>
+    </UiCard>
 
-    <div class="card col">
-      <div style="font-weight: 500">Agent</div>
-      <label class="col" style="gap: 4px">
-        <span class="muted" style="font-size: 12px">Agent service URL</span>
-        <input v-model="settings.agent_url" />
-      </label>
-    </div>
+    <UiCard title="Agent service">
+      <div>
+        <label class="field-label">Agent URL</label>
+        <input v-model="settings.agent_url" style="width: 100%" />
+      </div>
+    </UiCard>
 
-    <div v-if="error" style="color: var(--red)">{{ error }}</div>
+    <div v-if="error" style="color: var(--danger)">{{ error }}</div>
     <div class="row">
       <button class="primary" @click="save">Save</button>
-      <span v-if="saved" style="color: var(--green); font-size: 13px">Saved.</span>
+      <span v-if="saved" style="color: var(--ok); font-size: 13px">Saved ✓</span>
     </div>
   </div>
 </template>
+
+<style scoped>
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
+</style>
