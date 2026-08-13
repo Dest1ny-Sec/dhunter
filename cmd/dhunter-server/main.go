@@ -213,7 +213,7 @@ func printBanner(cfg *config.Config, adminGenerated bool) {
 		"",
 		fmt.Sprintf("  ONLINE  %s", addr),
 		fmt.Sprintf("  AGENT   %s", cfg.Agent.PythonURL),
-		fmt.Sprintf("  MCP     %s", cfg.MCP.WebHunter.URL),
+		fmt.Sprintf("  TOOLS   %s", cfg.MCP.WebHunter.URL),
 		fmt.Sprintf("  LLM     %s / %s", cfg.LLM.Provider, cfg.LLM.Model),
 		fmt.Sprintf("  STORE   %s", cfg.Storage.SQLitePath),
 		"",

@@ -9,8 +9,8 @@ interface Settings {
   llm_model: string
   llm_base_url: string
   llm_api_key: string
-  webhunter_url: string
-  webhunter_token: string
+  mcp_url: string
+  mcp_token: string
   agent_url: string
 }
 
@@ -19,12 +19,12 @@ const settings = ref<Settings>({
   llm_model: 'gpt-4o',
   llm_base_url: '',
   llm_api_key: '',
-  webhunter_url: 'http://127.0.0.1:9090',
-  webhunter_token: '',
+  mcp_url: 'http://127.0.0.1:9090',
+  mcp_token: '',
   agent_url: 'http://127.0.0.1:8081',
 })
 
-const webhunterStatus = ref<'unknown' | 'connected' | 'disconnected' | 'checking'>('unknown')
+const mcpStatus = ref<'unknown' | 'connected' | 'disconnected' | 'checking'>('unknown')
 const saved = ref(false)
 const error = ref<string | null>(null)
 
@@ -49,22 +49,22 @@ function save() {
   }
 }
 
-async function testWebhunter() {
-  webhunterStatus.value = 'checking'
+async function testMCP() {
+  mcpStatus.value = 'checking'
   try {
-    const res = await api.get('/tools/webhunter/health', { timeout: 5000 }).catch(() => null)
+    const res = await api.get('/api/tools/mcp/health', { timeout: 5000 }).catch(() => null)
     if (res && res.status >= 200 && res.status < 300) {
-      webhunterStatus.value = 'connected'
+      mcpStatus.value = 'connected'
     } else {
       // Fallback: try direct fetch
-      const ok = await fetch(settings.value.webhunter_url + '/health', { method: 'GET' }).then(
+      const ok = await fetch(settings.value.mcp_url + '/health', { method: 'GET' }).then(
         (r) => r.ok,
         () => false
       )
-      webhunterStatus.value = ok ? 'connected' : 'disconnected'
+      mcpStatus.value = ok ? 'connected' : 'disconnected'
     }
   } catch {
-    webhunterStatus.value = 'disconnected'
+    mcpStatus.value = 'disconnected'
   }
 }
 
@@ -124,22 +124,22 @@ onMounted(() => {
 
     <div class="card col">
       <div class="row">
-        <div style="font-weight: 500">MCP Tools — WebHunter</div>
+        <div style="font-weight: 500">MCP Tools — MCP Tools</div>
         <div class="spacer" />
-        <span class="pill" :style="{ color: statusColor[webhunterStatus], borderColor: statusColor[webhunterStatus] }">
-          {{ statusLabel[webhunterStatus] }}
+        <span class="pill" :style="{ color: statusColor[mcpStatus], borderColor: statusColor[mcpStatus] }">
+          {{ statusLabel[mcpStatus] }}
         </span>
       </div>
       <label class="col" style="gap: 4px">
-        <span class="muted" style="font-size: 12px">WebHunter URL</span>
-        <input v-model="settings.webhunter_url" />
+        <span class="muted" style="font-size: 12px">MCP Tools URL</span>
+        <input v-model="settings.mcp_url" />
       </label>
       <label class="col" style="gap: 4px">
         <span class="muted" style="font-size: 12px">Token</span>
-        <input v-model="settings.webhunter_token" type="password" />
+        <input v-model="settings.mcp_token" type="password" />
       </label>
       <div>
-        <button @click="testWebhunter">Test connection</button>
+        <button @click="testMCP">Test connection</button>
       </div>
     </div>
 
