@@ -63,6 +63,13 @@ class BoardClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def get_target(self, target_id: str) -> dict[str, Any]:
+        """Fetch a target, including its stored auth_context."""
+        resp = await self._request("GET", f"/api/targets/{target_id}")
+        if resp.status_code >= 400:
+            raise BoardError(f"get_target http {resp.status_code}: {resp.text[:300]}")
+        return resp.json()
+
     async def create_fact(self, run_id: str, description: str, source: str = "agent") -> str:
         resp = await self._request("POST", f"/api/runs/{run_id}/facts", json={"description": description, "source": source})
         if resp.status_code >= 400:

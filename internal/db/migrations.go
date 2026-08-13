@@ -151,6 +151,8 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"runs", "output_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"runs", "cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"runs", "cache_read_input_tokens INTEGER NOT NULL DEFAULT 0"},
+		{"vulnerabilities", "norm_title TEXT NOT NULL DEFAULT ''"},
+		{"targets", "auth_context TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !d.columnExists(ctx, col.table, strings.TrimSpace(strings.SplitN(col.def, " ", 2)[0])) {
 			if _, err := d.ExecContext(ctx, "ALTER TABLE "+col.table+" ADD COLUMN "+col.def); err != nil {

@@ -44,6 +44,7 @@ class RunManager:
         self.dispatching: set[str] = set()  # intent ids handed to a worker
         self.reason_rounds = 0
         self.started = time.monotonic()
+        self.run_auth: dict[str, Any] | None = None
 
     # --- lifecycle ------------------------------------------------------
 
@@ -74,11 +75,13 @@ class RunManager:
             await self.run.emit("run_done", {"status": "failed", "error": self.run.error})
         finally:
             self.run.finished_at = _now_iso()
+            self.registry.clear_run_auth(self.run.run_id)
 
     # --- scheduler ------------------------------------------------------
 
     async def _loop(self) -> None:
         await self._seed_origin_goal()
+        await self._load_auth()
         converged = False
         while time.monotonic() - self.started < OVERALL_TIMEOUT:
             graph = await self.board.graph(self.run.run_id)
@@ -110,7 +113,7 @@ class RunManager:
                 task = asyncio.create_task(
                     run_explore_worker(
                         self.run, self.board, self.registry, self.system_prompt,
-                        intent, worker_name,
+                        intent, worker_name, auth_context=self.run_auth,
                     ),
                     name=f"explore-{self.run.run_id}-{iid}",
                 )
@@ -159,6 +162,34 @@ class RunManager:
             # Non-fatal: the board may not be reachable at run start; the
             # worker's graph fetch will surface a real error later.
             log.warning("run %s: failed to seed origin/goal facts: %s", self.run.run_id, e)
+
+    async def _load_auth(self) -> None:
+        """Fetch the target's stored session (if any) and hand it to the
+        registry so http_request auto-injects cookies/headers for this run.
+        Also records it for the worker prompt."""
+        self.run_auth: dict[str, Any] | None = None
+        try:
+            graph = await self.board.graph(self.run.run_id)
+            target_id = (graph.get("run") or {}).get("target_id")
+            if not target_id:
+                return
+            target = await self.board.get_target(target_id)
+            raw = target.get("auth_context") or ""
+            if not raw or raw == "{}":
+                return
+            import json as _json
+            parsed = _json.loads(raw)
+            host = (target.get("normalized") or target.get("value") or "")
+            host = host.rstrip("/")
+            if host.startswith(("http://", "https://")):
+                from urllib.parse import urlparse
+                host = urlparse(host).hostname or host
+            self.run_auth = {**parsed, "host": host}
+            self.registry.set_run_auth(self.run.run_id, self.run_auth)
+            if parsed.get("cookies") or parsed.get("headers"):
+                log.info("run %s: authenticated session loaded for %s", self.run.run_id, host)
+        except Exception as e:  # noqa: BLE001
+            log.warning("run %s: failed to load auth context: %s", self.run.run_id, e)
 
     async def _reason_once(self, graph: dict[str, Any]) -> str:
         self.reason_rounds += 1

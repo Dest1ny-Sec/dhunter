@@ -13,6 +13,13 @@ const targets = ref<any[]>([])
 const targetsLoading = ref(false)
 const objective = ref<string>('Find SQLi, XSS, auth bypass, IDOR, and any real reproducible vulnerability. Report each with write_finding and a curl PoC.')
 
+// Authenticated session the agent auto-injects into http_request calls.
+// Most SRC/pentest targets require login to reach the interesting function
+// points, so this is the "give the AI your session" seam.
+const authCookies = ref('')
+const authHeaders = ref('')
+const authNote = ref('')
+
 const placeholders: Record<string, string> = {
   auto: 'e.g. acme.com, https://acme.com, 10.0.0.1, or "Acme Corp"',
   company: 'e.g. Acme Corp',
@@ -49,6 +56,18 @@ async function start() {
     const targetId = tRes.data?.id
     if (!targetId) throw new Error('No target id returned')
 
+    // 1.5 Attach the authenticated session if the user provided one.
+    const cookies = authCookies.value.trim()
+    const hasHeaders = authHeaders.value.trim().length > 0
+    if (cookies || hasHeaders) {
+      const headers = parseHeaders(authHeaders.value)
+      await api.patch(`/targets/${targetId}/auth`, {
+        cookies,
+        headers,
+        note: authNote.value.trim(),
+      })
+    }
+
     // 2. Start run
     const rRes = await api.post('/runs', { target_id: targetId, objective: objective.value })
     const runId = rRes.data?.id || rRes.data?.run_id
@@ -65,6 +84,23 @@ async function start() {
 
 function viewRuns(t: any) {
   router.push(`/targets/${t.id}/runs`)
+}
+
+// Parse "Key: value" lines into a header map (for the auth section).
+function parseHeaders(raw: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of raw.split('\n')) {
+    const idx = line.indexOf(':')
+    if (idx <= 0) continue
+    const k = line.slice(0, idx).trim()
+    const v = line.slice(idx + 1).trim()
+    if (k) out[k] = v
+  }
+  return out
+}
+
+function hasAuth(t: any): boolean {
+  return !!(t?.auth_context && t.auth_context !== '' && t.auth_context !== '{}')
 }
 
 onMounted(loadTargets)
@@ -105,6 +141,30 @@ onMounted(loadTargets)
           style="width: 100%; font-family: inherit; font-size: 13px"
         />
       </div>
+
+      <details class="auth-details">
+        <summary style="cursor: pointer; font-size: 13px; color: var(--accent, #3b82f6)">
+          🔐 Authenticated session (optional) — give the AI your login so it can test behind-auth function points
+        </summary>
+        <div class="col" style="gap: 10px; margin-top: 10px; padding-left: 4px">
+          <div>
+            <div class="muted" style="font-size: 12px; margin-bottom: 4px">Cookies (paste the whole Cookie header from DevTools, e.g. <code>sessionid=abc; uid=1</code>)</div>
+            <textarea v-model="authCookies" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="sessionid=...; " />
+          </div>
+          <div>
+            <div class="muted" style="font-size: 12px; margin-bottom: 4px">Extra headers (one per line, <code>Key: value</code>)</div>
+            <textarea v-model="authHeaders" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="Authorization: Bearer ..." />
+          </div>
+          <div>
+            <div class="muted" style="font-size: 12px; margin-bottom: 4px">Note to the AI (who is this account / what's its role?)</div>
+            <input v-model="authNote" style="width: 100%" placeholder="e.g. normal registered user, role=user" />
+          </div>
+          <div class="muted" style="font-size: 11px">
+            The AI auto-attaches these to requests matching this target's host, and compares anonymous vs authenticated access to hunt IDOR / privilege issues.
+          </div>
+        </div>
+      </details>
+
       <div v-if="error" style="color: var(--red); font-size: 13px">{{ error }}</div>
       <div class="row">
         <button class="primary" :disabled="loading" @click="start">
@@ -141,7 +201,10 @@ onMounted(loadTargets)
       <tbody>
         <tr v-for="t in targets" :key="t.id">
           <td><span class="pill">{{ t.type || 'auto' }}</span></td>
-          <td><code style="font-size: 12px">{{ t.value || t.normalized || t.id }}</code></td>
+          <td>
+            <code style="font-size: 12px">{{ t.value || t.normalized || t.id }}</code>
+            <span v-if="hasAuth(t)" title="authenticated session configured">🔐</span>
+          </td>
           <td class="muted" style="font-size: 12px">
             {{ t.created_at ? new Date(t.created_at).toLocaleString() : '—' }}
           </td>

@@ -103,6 +103,7 @@ func main() {
 		api.POST("/targets", targetH.Create)
 		api.GET("/targets", targetH.List)
 		api.GET("/targets/:id", targetH.Get)
+		api.PATCH("/targets/:id/auth", targetH.SetAuth)
 
 		runH := handler.NewRunHandler(stores, bridge, hub)
 		api.POST("/runs", runH.Create)

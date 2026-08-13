@@ -123,6 +123,38 @@ func (h *TargetHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"targets": ts})
 }
 
+// authReq is the body for PATCH /api/targets/:id/auth.
+type authReq struct {
+	Cookies string            `json:"cookies"`
+	Headers map[string]string `json:"headers"`
+	Note    string            `json:"note"`
+}
+
+// SetAuth stores (or clears) the authenticated session the agent should
+// auto-inject when testing this target. Stored as JSON on the target.
+func (h *TargetHandler) SetAuth(c *gin.Context) {
+	id := c.Param("id")
+	var body authReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	authJSON, err := json.Marshal(body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.Stores.Targets.SetAuth(c.Request.Context(), id, string(authJSON)); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
+}
+
 // ipV4 matches a literal IPv4 address. We intentionally don't bother with
 // IPv6 here — it's a stretch goal for v0.2.
 var ipV4 = regexp.MustCompile(`^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$`)

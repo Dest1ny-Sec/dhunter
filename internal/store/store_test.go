@@ -153,6 +153,45 @@ func TestVulnDedupAndStatusUpdate(t *testing.T) {
 	}
 }
 
+func TestVulnCreateIfAbsentDedupsNormalizedTitle(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tgt := &Target{Type: "url", Value: "https://x.com", Normalized: "x.com"}
+	if err := s.Targets.Create(ctx, tgt); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	run := &Run{TargetID: tgt.ID, Status: "running"}
+	if err := s.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	mk := func(title string) *Vulnerability {
+		return &Vulnerability{RunID: run.ID, TargetID: tgt.ID, Title: title,
+			Severity: "high", Target: "https://x.com/api", Evidence: "p", Status: "pending"}
+	}
+
+	created, _, err := s.Vulns.CreateIfAbsent(ctx, mk("Unauthenticated access to /api/admin"))
+	if err != nil || !created {
+		t.Fatalf("first insert should create: created=%v err=%v", created, err)
+	}
+	// Near-identical title (different case/whitespace/punctuation) must dedup.
+	created, existing, err := s.Vulns.CreateIfAbsent(ctx, mk("  Unauthenticated Access to /api/admin. "))
+	if err != nil || created || existing == "" {
+		t.Fatalf("normalized duplicate should dedup: created=%v existing=%q err=%v", created, existing, err)
+	}
+	// A genuinely different title must still be created.
+	created, _, err = s.Vulns.CreateIfAbsent(ctx, mk("SQL injection in /api/login"))
+	if err != nil || !created {
+		t.Fatalf("distinct finding should create: created=%v err=%v", created, err)
+	}
+	vs, _ := s.Vulns.ListByRun(ctx, run.ID)
+	if len(vs) != 2 {
+		t.Fatalf("expected 2 vulns, got %d", len(vs))
+	}
+}
+
 func TestVulnCreateIfAbsentDedups(t *testing.T) {
 	s, cleanup := newTestStores(t)
 	defer cleanup()

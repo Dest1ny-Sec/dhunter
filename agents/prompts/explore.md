@@ -13,6 +13,9 @@ you confirm, and conclude with a factual summary.
 ## Board (context — what the team knows)
 {graph_summary}
 
+## Session
+{auth_context}
+
 ## Current intent
 {intent_id}: {intent_description}
 

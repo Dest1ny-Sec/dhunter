@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +30,11 @@ type Target struct {
 	Value      string          `json:"value"`
 	Normalized string          `json:"normalized"`
 	Attributes json.RawMessage `json:"attributes"`
-	CreatedAt  time.Time       `json:"created_at"`
+	// AuthContext holds an authenticated session (cookies + headers) the
+	// agent auto-injects when testing this target — e.g. a white-hat's
+	// logged-in session so the agent can test behind-auth function points.
+	AuthContext string    `json:"auth_context"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // Run is a single agent execution.
@@ -72,6 +77,21 @@ type Vulnerability struct {
 	Impact         string    `json:"impact"`
 	Recommendation string    `json:"recommendation"`
 	CreatedAt      time.Time `json:"created_at"`
+	// NormTitle is a dedup key (lowercased, trimmed, whitespace-collapsed).
+	// It is computed by the store and never exposed over the API.
+	NormTitle string `json:"-"`
+}
+
+// normalizeTitle reduces a finding title to a stable dedup key so that
+// near-identical titles written by different workers (or LLM turns) are
+// treated as the same finding.
+func normalizeTitle(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	// collapse runs of whitespace
+	s = strings.Join(strings.Fields(s), " ")
+	// strip surrounding punctuation / trailing period
+	s = strings.Trim(s, ".,;:!?()[]{}'\"` ")
+	return s
 }
 
 // ToolCall is a single tool invocation and its result.
@@ -141,16 +161,29 @@ func (s *TargetStore) Create(ctx context.Context, t *Target) error {
 		t.Attributes = json.RawMessage(`{}`)
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO targets (id, type, value, normalized, attributes, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.CreatedAt.UnixMilli())
+		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.CreatedAt.UnixMilli())
 	return err
+}
+
+// SetAuth stores (or clears) the authenticated session for a target.
+func (s *TargetStore) SetAuth(ctx context.Context, id, auth string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE targets SET auth_context = ? WHERE id = ?`, auth, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Get fetches a target by ID.
 func (s *TargetStore) Get(ctx context.Context, id string) (*Target, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, type, value, normalized, attributes, created_at FROM targets WHERE id = ?`, id)
+		`SELECT id, type, value, normalized, attributes, auth_context, created_at FROM targets WHERE id = ?`, id)
 	return scanTarget(row)
 }
 
@@ -160,7 +193,7 @@ func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, value, normalized, attributes, created_at FROM targets
+		`SELECT id, type, value, normalized, attributes, auth_context, created_at FROM targets
 		 ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -185,7 +218,7 @@ func scanTarget(r rowScanner) (*Target, error) {
 	var t Target
 	var attrs string
 	var createdMs int64
-	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &createdMs); err != nil {
+	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -418,12 +451,15 @@ func (s *VulnStore) Create(ctx context.Context, v *Vulnerability) error {
 	if v.Status == "" {
 		v.Status = "open"
 	}
+	if v.NormTitle == "" {
+		v.NormTitle = normalizeTitle(v.Title)
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO vulnerabilities
-		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at, norm_title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, v.RunID, v.TargetID, v.Title, v.Severity, v.Status, v.Target,
-		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli())
+		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli(), v.NormTitle)
 	return err
 }
 
@@ -476,6 +512,9 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 	if v.Status == "" {
 		v.Status = "pending"
 	}
+	if v.NormTitle == "" {
+		v.NormTitle = normalizeTitle(v.Title)
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -485,8 +524,8 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 
 	var id string
 	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM vulnerabilities WHERE run_id = ? AND title = ? AND target = ? LIMIT 1`,
-		v.RunID, v.Title, v.Target).Scan(&id)
+		`SELECT id FROM vulnerabilities WHERE run_id = ? AND norm_title = ? AND target = ? LIMIT 1`,
+		v.RunID, v.NormTitle, v.Target).Scan(&id)
 	if err == nil {
 		return false, id, nil
 	}
@@ -496,10 +535,10 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO vulnerabilities
-		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at, norm_title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, v.RunID, v.TargetID, v.Title, v.Severity, v.Status, v.Target,
-		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli())
+		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli(), v.NormTitle)
 	if err != nil {
 		return false, "", err
 	}

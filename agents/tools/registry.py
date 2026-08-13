@@ -191,6 +191,7 @@ _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
                 "body": {"type": "string", "description": "Optional raw request body."},
                 "timeout": {"type": "number", "description": "Timeout in seconds. Default 30."},
                 "insecure": {"type": "boolean", "description": "Skip TLS certificate verification. Default false. Set true only for self-signed targets."},
+                "inject_auth": {"type": "boolean", "description": "Default true: attach the target's stored session (cookies/headers). Set false to test the anonymous surface."},
             },
             "required": ["url"],
         },
@@ -257,6 +258,56 @@ class ToolRegistry:
         self._mcp_tools: list[dict[str, Any]] = []
         self._initialized = False
         self._init_error: str | None = None
+        # run_id -> auth context {cookies, headers, note, host} injected into
+        # http_request calls for that run (see set_run_auth / _inject_auth).
+        self._run_auths: dict[str, dict[str, Any]] = {}
+
+    def set_run_auth(self, run_id: str, auth: dict[str, Any] | None) -> None:
+        if auth:
+            self._run_auths[run_id] = auth
+        else:
+            self._run_auths.pop(run_id, None)
+
+    def clear_run_auth(self, run_id: str) -> None:
+        self._run_auths.pop(run_id, None)
+
+    def _inject_auth(self, args: dict[str, Any], run_id: str) -> dict[str, Any]:
+        """Merge the run's stored session into an http_request's args when
+        the target URL belongs to the target host. Returns a NEW dict.
+
+        The LLM can opt out per-call with `inject_auth: false` (to test the
+        anonymous surface), and an explicit Cookie header it sets is kept.
+        """
+        if not run_id or run_id not in self._run_auths:
+            return args
+        if args.get("inject_auth") is False:
+            return args
+        auth = self._run_auths[run_id]
+        url = str(args.get("url") or "")
+        host = auth.get("host") or ""
+        if not host or not url:
+            return args
+        # match the host exactly or any subdomain of it
+        try:
+            from urllib.parse import urlparse
+            u = urlparse(url)
+        except Exception:  # noqa: BLE001
+            return args
+        if not u.hostname:
+            return args
+        if not (u.hostname == host or u.hostname.endswith("." + host)):
+            return args
+
+        out = dict(args)
+        headers = dict(out.get("headers") or {})
+        cookies = auth.get("cookies")
+        if cookies and "Cookie" not in headers:
+            headers["Cookie"] = cookies
+        for k, v in (auth.get("headers") or {}).items():
+            headers.setdefault(k, v)
+        if headers:
+            out["headers"] = headers
+        return out
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -303,6 +354,9 @@ class ToolRegistry:
             # write_finding / write_fact need the current run_id.
             if name in ("write_finding", "write_fact"):
                 return await handler(args, current_run_id=current_run_id)
+            # http_request auto-attaches the run's stored session.
+            if name == "http_request":
+                args = self._inject_auth(args, current_run_id)
             return await handler(args)
         # Delegate to MCP. If MCP was never initialised, try a one-shot init.
         if not self._initialized:
