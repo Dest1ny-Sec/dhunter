@@ -6,10 +6,13 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import EventStream, { type SSEEvent } from '../components/EventStream.vue'
 import SeverityBadge from '../components/SeverityBadge.vue'
+import BoardView from '../components/BoardView.vue'
 import { api } from '../api/client'
 
 const route = useRoute()
 const runId = computed(() => route.params.id as string)
+
+const tab = ref<'board' | 'stream' | 'report'>('board')
 
 const events = ref<SSEEvent[]>([])
 const runInfo = ref<any>(null)
@@ -224,7 +227,19 @@ watch(runId, async (v) => {
 
     <div v-if="error" style="color: var(--red)">{{ error }}</div>
 
-    <div v-if="status === 'running' || status === 'pending' || events.length > 0" class="run-panes">
+    <div class="tabs">
+      <button :class="['tab', { active: tab === 'board' }]" @click="tab = 'board'">Attack Graph</button>
+      <button :class="['tab', { active: tab === 'stream' }]" @click="tab = 'stream'">Live Stream</button>
+      <button :class="['tab', { active: tab === 'report' }]" @click="tab = 'report'">Report</button>
+    </div>
+
+    <div v-if="tab === 'board'" class="run-pane" style="flex: 1">
+      <div class="run-pane-body" style="padding: 0">
+        <BoardView :run-id="runId" />
+      </div>
+    </div>
+
+    <div v-if="tab === 'stream' && (status === 'running' || status === 'pending' || events.length > 0)" class="run-panes">
       <div class="run-pane">
         <div class="run-pane-header">Reasoning</div>
         <div class="run-pane-body">
@@ -272,7 +287,7 @@ watch(runId, async (v) => {
       </div>
     </div>
 
-    <div v-if="status === 'completed' || status === 'failed'" class="col" style="margin-top: 16px">
+    <div v-if="tab === 'report' && (status === 'completed' || status === 'failed')" class="col" style="margin-top: 16px">
       <div class="row">
         <h3 style="font-size: 14px; font-weight: 500">Report</h3>
         <div class="spacer" />
@@ -306,3 +321,30 @@ watch(runId, async (v) => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border, #2a2e3a);
+  padding-bottom: 6px;
+}
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted, #888);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text, #e5e7eb);
+}
+.tab.active {
+  color: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+}
+</style>
