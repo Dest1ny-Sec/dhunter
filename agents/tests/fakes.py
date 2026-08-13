@@ -17,11 +17,6 @@ from llm.anthropic_client import StreamEvent
 class FakeBoard:
     """In-memory board mirroring BoardClient's methods."""
 
-    def __init__(self):
-        self.facts: list[dict[str, Any]] = []
-        self.intents: list[dict[str, Any]] = []
-        self.hints: list[dict[str, Any]] = []
-
     def _new_id(self) -> str:
         return uuid.uuid4().hex[:12]
 
@@ -75,8 +70,23 @@ class FakeBoard:
                 return f["id"]
         return None
 
+    def __init__(self):
+        self.facts: list[dict[str, Any]] = []
+        self.intents: list[dict[str, Any]] = []
+        self.hints: list[dict[str, Any]] = []
+        self.vulns: list[dict[str, Any]] = []
+
     async def create_vulnerability(self, payload: dict[str, Any]) -> None:
-        pass
+        self.vulns.append({"id": self._new_id(), **payload})
+
+    async def list_vulnerabilities(self, run_id: str) -> list[dict[str, Any]]:
+        return [v for v in self.vulns if v.get("run_id") == run_id]
+
+    async def set_vuln_status(self, vuln_id: str, status: str) -> None:
+        for v in self.vulns:
+            if v["id"] == vuln_id:
+                v["status"] = status
+                return
 
     async def create_hint(self, run_id: str, content: str, creator: str = "agent") -> None:
         self.hints.append({"id": self._new_id(), "run_id": run_id, "content": content, "creator": creator})

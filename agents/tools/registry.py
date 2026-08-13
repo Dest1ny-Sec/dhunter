@@ -91,6 +91,8 @@ async def _write_finding(args: dict[str, Any], current_run_id: str = "") -> dict
         "severity": severity,
         "target": target,
         "evidence": evidence,
+        # New findings wait for the verifier before they count as confirmed.
+        "status": "pending",
     }
     if run_id:
         payload["run_id"] = run_id

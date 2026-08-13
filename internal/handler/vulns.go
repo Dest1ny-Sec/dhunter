@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -76,7 +77,7 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 		body.Severity = "medium"
 	}
 	if body.Status == "" {
-		body.Status = "open"
+		body.Status = "pending" // new findings wait for the verifier
 	}
 	if body.RunID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "run_id required"})
@@ -87,6 +88,9 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "run not found: " + body.RunID})
 		return
 	}
+	// Dedup within the run: same title + target is a duplicate. The check
+	// and insert are atomic (single transaction) so concurrent workers
+	// submitting the same finding can't both insert it.
 	v := &store.Vulnerability{
 		RunID:          body.RunID,
 		TargetID:       body.TargetID,
@@ -99,9 +103,48 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 		Recommendation: body.Recommendation,
 		CreatedAt:      time.Now().UTC(),
 	}
-	if err := h.Stores.Vulns.Create(c.Request.Context(), v); err != nil {
+	created, existingID, err := h.Stores.Vulns.CreateIfAbsent(c.Request.Context(), v)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if !created {
+		c.JSON(http.StatusConflict, gin.H{"error": "duplicate vulnerability", "existing_id": existingID})
+		return
+	}
 	c.JSON(http.StatusCreated, v)
+}
+
+// validVulnStatuses are the lifecycle states a finding can be in.
+var validVulnStatuses = map[string]struct{}{
+	"pending":   {}, // submitted, awaiting verification
+	"confirmed": {}, // verifier reproduced it
+	"dismissed": {}, // verifier could not reproduce
+	"open":      {}, // legacy / manually created
+}
+
+// PatchStatus handles PATCH /api/vulnerabilities/:id — flips the lifecycle
+// status (used by the agent's verifier: pending -> confirmed/dismissed).
+func (h *VulnsHandler) PatchStatus(c *gin.Context) {
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	body.Status = strings.ToLower(strings.TrimSpace(body.Status))
+	if _, ok := validVulnStatuses[body.Status]; !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status must be one of pending|confirmed|dismissed|open"})
+		return
+	}
+	if err := h.Stores.Vulns.UpdateStatus(c.Request.Context(), c.Param("id"), body.Status); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": c.Param("id"), "status": body.Status})
 }

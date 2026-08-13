@@ -100,3 +100,18 @@ class BoardClient:
         resp = await self._request("POST", "/api/vulnerabilities", json=payload)
         if resp.status_code >= 400:
             raise BoardError(f"create_vulnerability http {resp.status_code}: {resp.text[:300]}")
+
+    async def list_vulnerabilities(self, run_id: str) -> list[dict[str, Any]]:
+        """Fetch the run's vulnerabilities (with their lifecycle status)."""
+        resp = await self._request("GET", f"/api/runs/{run_id}/vulnerabilities")
+        if resp.status_code >= 400:
+            raise BoardError(f"list_vulnerabilities http {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        vulns = data.get("vulnerabilities") or data.get("data") or []
+        return vulns if isinstance(vulns, list) else []
+
+    async def set_vuln_status(self, vuln_id: str, status: str) -> None:
+        """Flip a vulnerability's lifecycle status (pending -> confirmed/dismissed)."""
+        resp = await self._request("PATCH", f"/api/vulnerabilities/{vuln_id}", json={"status": status})
+        if resp.status_code >= 400:
+            raise BoardError(f"set_vuln_status http {resp.status_code}: {resp.text[:300]}")

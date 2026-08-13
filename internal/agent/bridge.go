@@ -63,6 +63,9 @@ type Event struct {
 	VulnEvidence       string `json:"evidence,omitempty"`
 	VulnImpact         string `json:"impact,omitempty"`
 	VulnRecommendation string `json:"recommendation,omitempty"`
+	// RunStatus carries the terminal status from run_done (completed /
+	// failed / cancelled) so the store isn't force-set to completed.
+	RunStatus string `json:"run_status,omitempty"`
 	// Token usage (cumulative across the run).
 	InputTokens              int `json:"input_tokens,omitempty"`
 	OutputTokens             int `json:"output_tokens,omitempty"`
@@ -121,6 +124,27 @@ func (b *Bridge) CreateRun(ctx context.Context, req CreateRunRequest) error {
 	}
 	// Drain the body so the underlying conn can be reused.
 	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// CancelRun asks the Python sidecar to cancel a running run. The sidecar
+// cancels the agent task, which emits a terminal run_done(status=cancelled)
+// back through the normal SSE path so the store ends in a consistent state.
+func (b *Bridge) CancelRun(ctx context.Context, runID string) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		b.baseURL+"/v1/runs/"+runID+"/cancel", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := b.hc.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("cancel run: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("cancel run: status=%d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -280,6 +304,7 @@ func mapPayloadToEvent(name, runID string, p map[string]interface{}) *Event {
 		if ev.Content == "" {
 			ev.Content = getStr("status")
 		}
+		ev.RunStatus = getStr("status")
 	case "vulnerability":
 		ev.VulnTitle = getStr("title")
 		ev.VulnSeverity = getStr("severity")
@@ -373,9 +398,13 @@ func (b *Bridge) handle(ctx context.Context, ev *Event, rawJSON []byte) {
 		_ = b.bumpRunTokens(ctx, ev)
 	case EventRunDone:
 		ended := time.Now().UTC()
+		status := ev.RunStatus
+		if status == "" {
+			status = "completed"
+		}
 		_ = b.stores.Runs.Update(ctx, &store.Run{
 			ID:      ev.RunID,
-			Status:  "completed",
+			Status:  status,
 			Summary: ev.Content,
 			EndedAt: &ended,
 		})

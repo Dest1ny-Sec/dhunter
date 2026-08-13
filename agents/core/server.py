@@ -147,6 +147,20 @@ async def start_run(body: StartRunBody) -> JSONResponse:
     return JSONResponse({"run_id": body.run_id, "status": "queued"}, status_code=202)
 
 
+@app.post("/v1/runs/{run_id}/cancel")
+async def cancel_run(run_id: str) -> dict[str, object]:
+    """Cancel a running run: the Go backend calls this when the operator
+    hits POST /api/runs/:id/cancel. The RunManager's CancelledError path
+    emits a terminal run_done with status=cancelled."""
+    run = RUNS.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if run.task is not None and not run.task.done():
+        run.task.cancel()
+        return {"run_id": run_id, "status": "cancelling"}
+    return {"run_id": run_id, "status": run.status}
+
+
 @app.get("/v1/runs/{run_id}")
 async def get_run(run_id: str) -> dict[str, object]:
     run = RUNS.get(run_id)

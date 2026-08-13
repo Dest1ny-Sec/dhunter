@@ -72,6 +72,11 @@ func main() {
 		cancelBoot()
 		log.Fatalf("dhunter: migrate: %v", err)
 	}
+	// Crash recovery: runs left "running" by a previous process have no
+	// live agent session — mark them failed instead of hanging forever.
+	if err := store.New(database).Runs.RecoverStale(bootCtx); err != nil {
+		log.Printf("dhunter: warn: recover stale runs: %v", err)
+	}
 	cancelBoot()
 
 	// --- Stores / hub / agent bridge -------------------------------
@@ -101,6 +106,7 @@ func main() {
 
 		runH := handler.NewRunHandler(stores, bridge, hub)
 		api.POST("/runs", runH.Create)
+		api.POST("/runs/:id/cancel", runH.Cancel)
 
 		runsH := handler.NewRunsHandler(stores)
 		api.GET("/runs", runsH.List)
@@ -113,6 +119,7 @@ func main() {
 		vulnsH := handler.NewVulnsHandler(stores)
 		api.GET("/vulnerabilities", vulnsH.List)
 		api.POST("/vulnerabilities", vulnsH.Create)
+		api.PATCH("/vulnerabilities/:id", vulnsH.PatchStatus)
 
 		reportH := handler.NewReportHandler(stores)
 		api.GET("/runs/:id/report", reportH.Markdown)

@@ -23,6 +23,7 @@ from typing import Any
 from core.agent import OVERALL_TIMEOUT, AgentRun
 from core.board import BoardClient
 from core.reason import run_reason_step
+from core.verifier import run_verifier
 from core.worker import run_explore_worker
 from tools.registry import ToolRegistry
 
@@ -56,12 +57,12 @@ class RunManager:
             log.warning("run %s timed out after %ss", self.run.run_id, int(OVERALL_TIMEOUT))
             await self.run.emit("run_done", {"status": "failed", "error": self.run.error})
         except asyncio.CancelledError:
-            self.run.status = "failed"
+            self.run.status = "cancelled"
             self.run.error = "run cancelled"
             log.warning("run %s cancelled", self.run.run_id)
             await self._cancel_workers()
             try:
-                await self.run.emit("run_done", {"status": "failed", "error": self.run.error})
+                await self.run.emit("run_done", {"status": "cancelled", "error": self.run.error})
             except Exception:  # noqa: BLE001
                 pass
             raise
@@ -136,6 +137,9 @@ class RunManager:
             # The loop's own timeout fired (rare — wait_for would usually
             # have caught it). Surface it as a failure.
             raise RuntimeError(f"overall timeout ({int(OVERALL_TIMEOUT)}s) exceeded")
+
+        # Quality gate: independently re-judge every pending finding.
+        await run_verifier(self.run, self.board, self.system_prompt)
 
         # final summary from the board
         summary = await self._build_summary()

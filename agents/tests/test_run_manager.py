@@ -13,6 +13,7 @@ import core.agent as agent_mod
 from core.agent import AgentRun
 from core.board import BoardClient  # noqa: F401  (interface reference)
 from core.run_manager import RunManager
+from llm.anthropic_client import StreamEvent
 from tools.registry import ToolRegistry
 from fakes import FakeBoard, ScriptedLLM
 
@@ -95,6 +96,47 @@ def test_reason_complete_converges():
     assert run.status == "success"
     assert "objective met" in run.summary
     assert board.intents == []
+
+
+def test_cancel_run_sets_cancelled_status():
+    """Cancelling the manager task must cancel workers and end the run
+    with status=cancelled (and a run_done event)."""
+
+    class SlowLLM(ScriptedLLM):
+        async def stream_chat(self, system, messages, tools=None, **kwargs):
+            first = ""
+            if messages:
+                c = messages[0].get("content")
+                first = c if isinstance(c, str) else ""
+            text = self.explore_response if "Current intent" in first else self.reason_response
+            await asyncio.sleep(0.05)  # give the dispatcher time to see the worker
+            yield StreamEvent(type="content_block_delta",
+                              data={"delta": {"type": "text_delta", "text": text}})
+            yield StreamEvent(type="usage",
+                              data={"input_tokens": 1, "output_tokens": 1,
+                                    "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0})
+
+    llm = SlowLLM(
+        reason_response='{"kind": "intents", "intents": [{"from": [], "description": "long task"}]}',
+        explore_response="Still exploring, will take a while.",
+    )
+    agent_mod.stream_chat = llm.stream_chat
+
+    async def scenario():
+        run = _make_run(run_id="test-cancel")
+        board = FakeBoard()
+        mgr = RunManager(run, board, ToolRegistry(), system_prompt="sys")
+        task = asyncio.create_task(mgr.execute())
+        await asyncio.sleep(0.15)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return run
+
+    run = asyncio.run(scenario())
+    assert run.status == "cancelled"
 
 
 def test_parallel_workers_claim_distinct_intents():

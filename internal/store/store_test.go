@@ -111,3 +111,108 @@ func TestTargetGetNotFound(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+func TestVulnDedupAndStatusUpdate(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tgt := &Target{Type: "url", Value: "https://x.com", Normalized: "x.com"}
+	if err := s.Targets.Create(ctx, tgt); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	run := &Run{TargetID: tgt.ID, Status: "running"}
+	if err := s.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	v := &Vulnerability{RunID: run.ID, TargetID: tgt.ID, Title: "SQLi in login", Severity: "high",
+		Target: "https://x.com/login", Evidence: "payload", Status: "pending"}
+	if err := s.Vulns.Create(ctx, v); err != nil {
+		t.Fatalf("create vuln: %v", err)
+	}
+
+	// exact duplicate is found
+	dup, err := s.Vulns.FindDuplicate(ctx, run.ID, "SQLi in login", "https://x.com/login")
+	if err != nil || dup != v.ID {
+		t.Fatalf("expected duplicate id %s, got %s (err %v)", v.ID, dup, err)
+	}
+	// different title is not a duplicate
+	dup, err = s.Vulns.FindDuplicate(ctx, run.ID, "Other", "https://x.com/login")
+	if err != nil || dup != "" {
+		t.Fatalf("expected no duplicate, got %q (err %v)", dup, err)
+	}
+
+	// status update
+	if err := s.Vulns.UpdateStatus(ctx, v.ID, "confirmed"); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	got, err := s.Vulns.Get(ctx, v.ID)
+	if err != nil || got.Status != "confirmed" {
+		t.Fatalf("status not updated: %+v (err %v)", got, err)
+	}
+}
+
+func TestVulnCreateIfAbsentDedups(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tgt := &Target{Type: "url", Value: "https://x.com", Normalized: "x.com"}
+	if err := s.Targets.Create(ctx, tgt); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	run := &Run{TargetID: tgt.ID, Status: "running"}
+	if err := s.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	mk := func() *Vulnerability {
+		return &Vulnerability{RunID: run.ID, TargetID: tgt.ID, Title: "SQLi in login",
+			Severity: "high", Target: "https://x.com/login", Evidence: "p", Status: "pending"}
+	}
+
+	created, existing, err := s.Vulns.CreateIfAbsent(ctx, mk())
+	if err != nil || !created || existing != "" {
+		t.Fatalf("first insert should create: created=%v existing=%q err=%v", created, existing, err)
+	}
+	created, existing, err = s.Vulns.CreateIfAbsent(ctx, mk())
+	if err != nil || created || existing == "" {
+		t.Fatalf("second insert should dedup: created=%v existing=%q err=%v", created, existing, err)
+	}
+	vs, _ := s.Vulns.ListByRun(ctx, run.ID)
+	if len(vs) != 1 {
+		t.Fatalf("expected 1 vuln after dedup, got %d", len(vs))
+	}
+}
+
+func TestRunRecoverStale(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tgt := &Target{Type: "url", Value: "https://x.com", Normalized: "x.com"}
+	if err := s.Targets.Create(ctx, tgt); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	r1 := &Run{TargetID: tgt.ID, Status: "running"}
+	if err := s.Runs.Create(ctx, r1); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	r2 := &Run{TargetID: tgt.ID, Status: "completed"}
+	if err := s.Runs.Create(ctx, r2); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := s.Runs.RecoverStale(ctx); err != nil {
+		t.Fatalf("recover stale: %v", err)
+	}
+	g1, _ := s.Runs.Get(ctx, r1.ID)
+	g2, _ := s.Runs.Get(ctx, r2.ID)
+	if g1.Status != "failed" {
+		t.Fatalf("stale run should be failed, got %s", g1.Status)
+	}
+	if g2.Status != "completed" {
+		t.Fatalf("completed run must be untouched, got %s", g2.Status)
+	}
+}

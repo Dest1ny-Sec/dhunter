@@ -220,6 +220,15 @@ func (s *RunStore) Create(ctx context.Context, r *Run) error {
 	return err
 }
 
+// RecoverStale marks any run still stuck in running/pending as failed.
+// Called at server startup: if the process died mid-run, those runs have
+// no live agent session and would otherwise be "running" forever.
+func (s *RunStore) RecoverStale(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET status = 'failed', summary = 'interrupted by server restart' WHERE status IN ('running','pending')`)
+	return err
+}
+
 // Update mutates a run in place. Pass only the fields you want changed.
 func (s *RunStore) Update(ctx context.Context, r *Run) error {
 	res, err := s.db.ExecContext(ctx,
@@ -416,6 +425,91 @@ func (s *VulnStore) Create(ctx context.Context, v *Vulnerability) error {
 		v.ID, v.RunID, v.TargetID, v.Title, v.Severity, v.Status, v.Target,
 		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli())
 	return err
+}
+
+// UpdateStatus changes a vulnerability's lifecycle status. Used by the
+// verifier to flip pending -> confirmed / dismissed.
+func (s *VulnStore) UpdateStatus(ctx context.Context, id, status string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE vulnerabilities SET status = ? WHERE id = ?`, status, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// FindDuplicate returns the ID of an existing vuln in the same run with
+// the same (normalized) title + target, or "" when none exists.
+func (s *VulnStore) FindDuplicate(ctx context.Context, runID, title, target string) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM vulnerabilities WHERE run_id = ? AND title = ? AND target = ? LIMIT 1`,
+		runID, title, target).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// CreateIfAbsent inserts a vulnerability only if no duplicate
+// (run_id + title + target) exists. The check and insert happen in one
+// transaction, so concurrent workers submitting the same finding can't
+// both pass the duplicate check (which is what made FindDuplicate + Create
+// racy). Returns created=true when inserted, otherwise the existing ID.
+func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (created bool, existingID string, err error) {
+	if v.ID == "" {
+		v.ID = uuid.NewString()
+	}
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = time.Now().UTC()
+	}
+	if v.Status == "" {
+		v.Status = "pending"
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer tx.Rollback()
+
+	var id string
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM vulnerabilities WHERE run_id = ? AND title = ? AND target = ? LIMIT 1`,
+		v.RunID, v.Title, v.Target).Scan(&id)
+	if err == nil {
+		return false, id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, "", err
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO vulnerabilities
+		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		v.ID, v.RunID, v.TargetID, v.Title, v.Severity, v.Status, v.Target,
+		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli())
+	if err != nil {
+		return false, "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, "", errors.New("insert vulnerability affected 0 rows")
+	}
+	if err := tx.Commit(); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
 }
 
 // Get fetches a vulnerability by ID.

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -80,6 +81,39 @@ func (h *RunHandler) Create(c *gin.Context) {
 	})
 }
 
+// Cancel handles POST /api/runs/:id/cancel. It asks the Python sidecar to
+// cancel the run and, as a fallback if the sidecar is unreachable, marks
+// the run cancelled locally so the UI never hangs in "running".
+func (h *RunHandler) Cancel(c *gin.Context) {
+	runID := c.Param("id")
+	run, err := h.Stores.Runs.Get(c.Request.Context(), runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if run.Status != "running" && run.Status != "pending" {
+		c.JSON(http.StatusConflict, gin.H{"error": "run is not running"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := h.Bridge.CancelRun(ctx, runID); err != nil {
+		// Sidecar unreachable — mark cancelled locally so the run isn't
+		// stuck as running forever.
+		log.Printf("dhunter: cancel run %s: sidecar error: %v", runID, err)
+		ended := time.Now().UTC()
+		_ = h.Stores.Runs.Update(context.Background(), &store.Run{
+			ID: runID, Status: "cancelled", EndedAt: &ended,
+		})
+	}
+	c.JSON(http.StatusAccepted, gin.H{"ok": true, "run_id": runID})
+}
+
 // startAgent asks the Python sidecar to start the run and then
 // subscribes to its SSE stream. If either call fails we mark the run as
 // failed in the store so the UI can surface a useful error.
@@ -103,13 +137,18 @@ func (h *RunHandler) startAgent(run *store.Run, targetValue string) {
 		return
 	}
 	// Successful end-of-stream: ensure the run is marked completed even
-	// if the sidecar forgot to send run_done.
+	// if the sidecar forgot to send run_done — but only if the sidecar
+	// hasn't already set a terminal status (completed/failed/cancelled)
+	// via the run_done event. Overwriting here would clobber "cancelled".
 	ended := time.Now().UTC()
-	_ = h.Stores.Runs.Update(ctx, &store.Run{
-		ID:      run.ID,
-		Status:  "completed",
-		EndedAt: &ended,
-	})
+	if cur, err := h.Stores.Runs.Get(ctx, run.ID); err == nil &&
+		(cur.Status == "running" || cur.Status == "pending") {
+		_ = h.Stores.Runs.Update(ctx, &store.Run{
+			ID:      run.ID,
+			Status:  "completed",
+			EndedAt: &ended,
+		})
+	}
 }
 
 func (h *RunHandler) markFailed(runID string, cause error) {
