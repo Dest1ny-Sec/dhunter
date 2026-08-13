@@ -159,3 +159,47 @@ DHUNTER_LLM_KEY="sk-cp-..." ./scripts/start-dhunter.sh start   # 启动三件套
 - Mac 平台优先(Go 编译 mac native)
 - 商业 license
 - 真实漏洞优于模板扫(LLM 主动渗透)
+
+---
+
+# v0.2 — 黑板引擎大改 (2026-08-13)
+
+**目标**: 学 cairn-ref 的 fact/intent 黑板 + OODA worker 协作(stigmergy), 原创实现, 不抄代码。
+**效果**: 从"单 agent 串行"升级为"多 worker 并行探索共享黑板"。
+
+## 架构变化
+
+| 层 | 之前 | 现在 |
+|---|---|---|
+| 状态记忆 | 对话历史(隐式) | **黑板**: facts(已确认事实) + intents(探索方向) + hints(人工注入), Go SQLite 持久化 |
+| 引擎 | 单 agent 串行 loop | **RunManager 调度器**: reason(读图→提新 intent / 判定收敛) + N 个 explore worker 并行认领 intent |
+| 并行 | 无 | `DHUNTER_MAX_WORKERS`(默认 3) |
+| 收敛 | agent 自说自话 | 无 open intent 且 reason 判 noop → 自动停止 |
+| 漏洞可信度 | LLM 自报 | **verifier 二次复核**: write_finding 先进 pending, run 结束后独立 LLM 复核 → confirmed / dismissed |
+| 去重 | 无 | 同 run 同 title+target 原子去重(事务) |
+| 取消 | 无 | `POST /api/runs/:id/cancel` → 侧车取消全部 worker → status=cancelled |
+| 崩溃恢复 | 无 | Go 启动把残留 running 标 failed |
+
+## 关键文件 (v0.2 新增)
+
+- `internal/store/board.go` — facts/intents/hints 存储, CAS claim / 原子 conclude
+- `internal/handler/board.go` — 黑板 API + graph 导出 + SSE 广播
+- `agents/core/board.py` — 黑板 Go HTTP client
+- `agents/core/run_manager.py` — 调度器(seed origin/goal → reason → explore → converge)
+- `agents/core/reason.py` / `worker.py` / `verifier.py` — 三步
+- `agents/prompts/reason.md` / `explore.md` — 原创渗透 prompt
+- `frontend/src/components/BoardView.vue` — 因果图(SVG) + Hint 输入
+
+## E2E 验证 (mock LLM, 无真实 API 消耗)
+
+`agents/tests/mock_llm_server.py`(Anthropic SSE 协议 mock) + `/tmp/dhunter-e2e.sh`:
+
+- run status = **success**; 4 facts(origin/goal + 2 结论); 2 个 intent 由 **w1/w2 并行** conclude
+- 漏洞: write_finding → **pending** → verifier → **confirmed**; 重复提交被原子去重
+- 取消: `POST /api/runs/:id/cancel` → status = **cancelled**
+
+## 待办
+
+- 真实 LLM + Juice Shop 冒烟(需 DHUNTER_LLM_KEY)
+- 工具集从 desredteam vendored 的 webhunter 重写为自研(法律线, Apache-2.0 署名/CC BY-NC 风险)
+- 多租户 / RBAC / 审计日志(商用数据模型, 现在 facts/intents 无 org_id)

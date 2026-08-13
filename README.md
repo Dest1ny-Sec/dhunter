@@ -4,15 +4,15 @@
 
 Dhunter is a commercial-grade red-team productivity tool. It is not a vulnerability scanner: a single (and later multi-) LLM agent drives a curated toolbox to perform **manual-style** reconnaissance, active probing, and exploit verification.
 
-> MVP scope: end-to-end single-agent loop (target parse → AI thinking stream → active testing → vulnerability list → Markdown report).
-> Out of MVP scope: attack-chain graph, multi-agent parallelism, report template import (planned for v1.1+).
+> v0.2 scope: blackboard engine (origin/goal facts → planner proposes intents → parallel explore workers conclude facts → verified vulnerabilities → Markdown report).
+> Out of v0.2 scope: report template import, multi-tenant/RBAC, audit log (planned).
 
 ---
 
 ## Highlights
 
 - **Target parser** — accept company name / domain / URL / IP, normalize into a `Target` struct
-- **Single-agent loop** — Python FastAPI service that drives an LLM with a curated tool belt
+- **Blackboard engine** — facts/intents/hints board (SQLite) + a dispatcher running parallel explore workers that coordinate through it (stigmergy), driven by an LLM with a curated tool belt
 - **Real-time thinking stream** — SSE-pushed `reasoning_delta` / `tool_call` / `tool_result` / `response_delta` events
 - **Active testing tools** — HTTP probing, parameter fuzzing, auth bypass, info-leak path discovery
 - **Vulnerability store** — SQLite, FK-bound to `Target` and `Run`
