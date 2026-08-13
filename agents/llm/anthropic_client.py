@@ -135,6 +135,10 @@ async def stream_chat(
 
     headers = {
         "x-api-key": api_key,
+        # Many Anthropic-compatible gateways (DeepSeek, one-api proxies)
+        # accept Authorization instead of / in addition to x-api-key.
+        # Sending both keeps real Anthropic + compat layers working.
+        "authorization": f"Bearer {api_key}",
         "anthropic-version": _env("DHUNTER_LLM_VERSION", DEFAULT_VERSION),
         "content-type": "application/json",
         "accept": "text/event-stream",
@@ -239,6 +243,7 @@ async def create_message(
 
     headers = {
         "x-api-key": api_key,
+        "authorization": f"Bearer {api_key}",
         "anthropic-version": _env("DHUNTER_LLM_VERSION", DEFAULT_VERSION),
         "content-type": "application/json",
         "accept": "application/json",

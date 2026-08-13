@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from llm.anthropic_client import stream_chat
+from llm.client import stream_chat
 from tools.registry import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -91,8 +91,10 @@ async def run_tool_loop(
 
         text_buf = ""
         tool_uses: list[dict[str, Any]] = []
+        thinking_blocks: list[dict[str, Any]] = []
         current_tool: dict[str, Any] | None = None
         current_tool_input_json = ""
+        current_thinking: dict[str, Any] | None = None
         stop_reason: str | None = None
 
         try:
@@ -101,9 +103,15 @@ async def run_tool_loop(
                     t = ev.type
                     if t == "content_block_start":
                         block = ev.data.get("content_block") or {}
-                        if block.get("type") == "tool_use":
+                        btype = block.get("type")
+                        if btype == "tool_use":
                             current_tool = {"id": block.get("id"), "name": block.get("name"), "input": None}
                             current_tool_input_json = ""
+                        elif btype == "thinking":
+                            # Preserve the block (with signature) so it can be
+                            # echoed back — Anthropic requires it on the next
+                            # turn; reasoning models like DeepSeek emit it too.
+                            current_thinking = {"type": "thinking", "thinking": "", "signature": block.get("signature", "")}
                     elif t == "content_block_delta":
                         delta = ev.data.get("delta") or {}
                         dtype = delta.get("type")
@@ -114,7 +122,10 @@ async def run_tool_loop(
                         elif dtype == "input_json_delta":
                             current_tool_input_json += delta.get("partial_json", "") or ""
                         elif dtype == "thinking_delta":
-                            await run.emit("reasoning_delta", {"delta": delta.get("thinking", "") or "", "accumulated": ""})
+                            chunk = delta.get("thinking", "") or ""
+                            if current_thinking is not None:
+                                current_thinking["thinking"] += chunk
+                            await run.emit("reasoning_delta", {"delta": chunk, "accumulated": ""})
                     elif t == "content_block_stop":
                         if current_tool is not None:
                             raw = current_tool_input_json
@@ -126,6 +137,9 @@ async def run_tool_loop(
                             tool_uses.append(current_tool)
                             current_tool = None
                             current_tool_input_json = ""
+                        elif current_thinking is not None:
+                            thinking_blocks.append(current_thinking)
+                            current_thinking = None
                     elif t == "message_delta":
                         stop_reason = (ev.data.get("delta") or {}).get("stop_reason") or stop_reason
                     elif t == "usage":
@@ -139,6 +153,9 @@ async def run_tool_loop(
             raise RuntimeError(f"LLM step timeout ({step_timeout:.0f}s) on iteration {iteration}") from e
 
         content_blocks: list[dict[str, Any]] = []
+        # Anthropic requires thinking blocks before text/tool_use, and the
+        # signature must be echoed back verbatim.
+        content_blocks.extend(thinking_blocks)
         if text_buf:
             content_blocks.append({"type": "text", "text": text_buf})
             final_text_parts.append(text_buf)
