@@ -34,7 +34,9 @@ _AGENTS_DIR = _HERE.parent
 if str(_AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(_AGENTS_DIR))
 
-from core.agent import AgentRun, run_agent  # noqa: E402
+from core.agent import AgentRun  # noqa: E402
+from core.board import BoardClient  # noqa: E402
+from core.run_manager import RunManager  # noqa: E402
 from tools.registry import ToolRegistry  # noqa: E402
 
 logging.basicConfig(
@@ -66,6 +68,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         log.warning("tool registry init error: %s", e)
     app.state.registry = registry
+    app.state.board = BoardClient()
     app.state.system_prompt = _load_system_prompt()
     log.info(
         "agent ready: tools=%d (mcp_loaded=%s)",
@@ -76,6 +79,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await registry.aclose()
+        await app.state.board.aclose()
 
 
 app = FastAPI(title="dhunter-agent", version="0.1.0", lifespan=lifespan)
@@ -128,10 +132,12 @@ async def start_run(body: StartRunBody) -> JSONResponse:
     QUEUES[body.run_id] = queue
 
     registry: ToolRegistry = app.state.registry
+    board: BoardClient = app.state.board
     system_prompt: str = app.state.system_prompt
 
+    manager = RunManager(run, board, registry, system_prompt)
     task = asyncio.create_task(
-        run_agent(run, registry, system_prompt=system_prompt),
+        manager.execute(),
         name=f"agent-run-{body.run_id}",
     )
     run.task = task

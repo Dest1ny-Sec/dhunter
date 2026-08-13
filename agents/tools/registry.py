@@ -128,9 +128,41 @@ async def _write_finding(args: dict[str, Any], current_run_id: str = "") -> dict
         }
 
 
+async def _write_fact(args: dict[str, Any], current_run_id: str = "") -> dict[str, Any]:
+    """Record an intermediate confirmed observation on the run's board.
+
+    Facts are the blackboard's stepping stones: subdomains found, an
+    endpoint discovered, a fingerprint, a credential — anything the agent
+    now knows that later exploration can build on. This is NOT for
+    vulnerabilities (use write_finding) and NOT for unconfirmed guesses.
+    """
+    description = (args.get("description") or "").strip()
+    if not description:
+        return {"content": "write_fact: `description` is required", "is_error": True}
+    run_id = args.get("run_id") or current_run_id
+    if not run_id:
+        return {"content": "write_fact: no run_id available", "is_error": True}
+
+    url = _backend_url() + f"/api/runs/{run_id}/facts"
+    headers = {"Content-Type": "application/json"}
+    backend_token = os.environ.get("DHUNTER_BACKEND_TOKEN", "").strip()
+    if backend_token:
+        headers["Authorization"] = f"Bearer {backend_token}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json={"description": description, "source": "agent"}, headers=headers)
+        if resp.status_code >= 400:
+            return {"content": f"write_fact: backend rejected HTTP {resp.status_code} {resp.text[:300]}", "is_error": True}
+        return {"content": f"write_fact: recorded (HTTP {resp.status_code})", "is_error": False}
+    except Exception as e:  # noqa: BLE001
+        log.warning("write_fact: backend unreachable: %s", e)
+        return {"content": f"write_fact: backend unreachable ({type(e).__name__}: {e})", "is_error": True}
+
+
 _FALLBACK_HANDLERS: dict[str, Any] = {
     "http_request": _http_request,
     "write_finding": _write_finding,
+    "write_fact": _write_fact,
 }
 
 _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
@@ -159,6 +191,23 @@ _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
                 "insecure": {"type": "boolean", "description": "Skip TLS certificate verification. Default false. Set true only for self-signed targets."},
             },
             "required": ["url"],
+        },
+    },
+    {
+        "name": "write_fact",
+        "description": (
+            "Record an intermediate confirmed observation on the run's board "
+            "(a subdomain, an endpoint, a fingerprint, a credential). Facts are "
+            "stepping stones other exploration builds on. NOT for vulnerabilities "
+            "(use write_finding) and NOT for unconfirmed guesses."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "One concise, factual observation."},
+                "run_id": {"type": "string", "description": "Optional run id. Auto-set by the agent."},
+            },
+            "required": ["description"],
         },
     },
     {
@@ -249,8 +298,8 @@ class ToolRegistry:
         args = arguments or {}
         if name in _FALLBACK_HANDLERS:
             handler = _FALLBACK_HANDLERS[name]
-            # write_finding needs the current run_id; the rest don't.
-            if name == "write_finding":
+            # write_finding / write_fact need the current run_id.
+            if name in ("write_finding", "write_fact"):
                 return await handler(args, current_run_id=current_run_id)
             return await handler(args)
         # Delegate to MCP. If MCP was never initialised, try a one-shot init.
