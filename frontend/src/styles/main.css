@@ -510,3 +510,18 @@ code:not(pre code) {
 .chip-group .chip { padding: 4px 12px; border-radius: 999px; font-size: 11.5px; color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
 .chip-group .chip.active { background: var(--accent); color: #fff; }
 .chip-group .chip:hover:not(.active) { color: var(--text); }
+
+/* Borderless filter / search controls (no box-lines) */
+input.filter, select.filter, textarea.filter,
+.filters input, .filters select, .filters textarea,
+.search-box, .search-input {
+  background: var(--bg-elev-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+}
+input.filter:focus, select.filter:focus,
+.filters input:focus, .filters select:focus {
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.25);
+  border: none;
+}

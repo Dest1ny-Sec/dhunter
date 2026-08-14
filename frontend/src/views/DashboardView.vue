@@ -104,9 +104,9 @@ onMounted(async () => {
     const [t, r, v] = await Promise.all([
       api.get('/targets'), api.get('/runs'), api.get('/vulnerabilities'),
     ])
-    targets.value = t.data?.targets || t.data || []
-    runs.value = r.data?.runs || r.data || []
-    vulns.value = v.data?.vulnerabilities || v.data || []
+    targets.value = Array.isArray(t.data?.targets) ? t.data.targets : Array.isArray(t.data) ? t.data : []
+    runs.value = Array.isArray(r.data?.runs) ? r.data.runs : Array.isArray(r.data) ? r.data : []
+    vulns.value = Array.isArray(v.data?.vulnerabilities) ? v.data.vulnerabilities : Array.isArray(v.data) ? v.data : []
   } finally {
     loading.value = false
   }

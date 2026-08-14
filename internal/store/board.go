@@ -101,7 +101,7 @@ func (s *FactStore) ListByRun(ctx context.Context, runID string) ([]*Fact, error
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Fact
+	out := make([]*Fact, 0)
 	for rows.Next() {
 		f, err := scanFact(rows)
 		if err != nil {
@@ -160,7 +160,7 @@ func (s *IntentStore) ListByRun(ctx context.Context, runID string) ([]*Intent, e
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Intent
+	out := make([]*Intent, 0)
 	for rows.Next() {
 		i, err := scanIntent(rows)
 		if err != nil {
@@ -180,7 +180,7 @@ func (s *IntentStore) OpenIntents(ctx context.Context, runID string) ([]*Intent,
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Intent
+	out := make([]*Intent, 0)
 	for rows.Next() {
 		i, err := scanIntent(rows)
 		if err != nil {
@@ -343,7 +343,7 @@ func (s *HintStore) ListByRun(ctx context.Context, runID string) ([]*Hint, error
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Hint
+	out := make([]*Hint, 0)
 	for rows.Next() {
 		var h Hint
 		var ms int64

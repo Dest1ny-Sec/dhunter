@@ -202,7 +202,7 @@ func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Target
+	out := make([]*Target, 0)
 	for rows.Next() {
 		t, err := scanTarget(rows)
 		if err != nil {
@@ -319,7 +319,7 @@ func (s *RunStore) ListByTarget(ctx context.Context, targetID string, limit int)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Run
+	out := make([]*Run, 0)
 	for rows.Next() {
 		r, err := scanRun(rows)
 		if err != nil {
@@ -343,7 +343,7 @@ func (s *RunStore) List(ctx context.Context, limit int) ([]*Run, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Run
+	out := make([]*Run, 0)
 	for rows.Next() {
 		r, err := scanRun(rows)
 		if err != nil {
@@ -412,7 +412,7 @@ func (s *MessageStore) ListByRun(ctx context.Context, runID string) ([]*Message,
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Message
+	out := make([]*Message, 0)
 	for rows.Next() {
 		m, err := scanMessage(rows)
 		if err != nil {
@@ -609,7 +609,7 @@ func (s *VulnStore) query(ctx context.Context, q string, args ...any) ([]*Vulner
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Vulnerability
+	out := make([]*Vulnerability, 0)
 	for rows.Next() {
 		v, err := scanVuln(rows)
 		if err != nil {
@@ -670,7 +670,7 @@ func (s *ToolCallStore) ListByRun(ctx context.Context, runID string) ([]*ToolCal
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*ToolCall
+	out := make([]*ToolCall, 0)
 	for rows.Next() {
 		t, err := scanToolCall(rows)
 		if err != nil {
