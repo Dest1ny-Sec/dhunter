@@ -101,7 +101,7 @@ async def run_explore_worker(
             template,
             origin=run.target,
             goal=run.objective,
-            graph_summary=render_graph_summary(graph),
+            graph_summary=render_graph_summary(graph, max_facts=15),  # worker only needs target + recent context
             intent_id=intent_id,
             intent_description=intent.get("description", ""),
             auth_context=auth_note,

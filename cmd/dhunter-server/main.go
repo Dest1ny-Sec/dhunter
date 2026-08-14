@@ -112,6 +112,7 @@ func main() {
 		runH := handler.NewRunHandler(stores, bridge, hub)
 		api.POST("/runs", runH.Create)
 		api.POST("/runs/:id/cancel", runH.Cancel)
+		api.POST("/runs/:id/continue", runH.Continue)
 
 		runsH := handler.NewRunsHandler(stores)
 		api.GET("/runs", runsH.List)

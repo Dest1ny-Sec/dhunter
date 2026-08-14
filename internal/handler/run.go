@@ -114,6 +114,39 @@ func (h *RunHandler) Cancel(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "run_id": runID})
 }
 
+// Continue handles POST /api/runs/:id/continue — resumes a finished run
+// from its durable board. The Python agent starts a FRESH agent loop that
+// re-reads the existing facts/intents (the board IS the session memory), so
+// the user can "go deeper" without the LLM context growing unboundedly.
+func (h *RunHandler) Continue(c *gin.Context) {
+	runID := c.Param("id")
+	run, err := h.Stores.Runs.Get(c.Request.Context(), runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if run.Status == "running" || run.Status == "pending" {
+		c.JSON(http.StatusConflict, gin.H{"error": "run is already running"})
+		return
+	}
+	target, err := h.Stores.Targets.Get(c.Request.Context(), run.TargetID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// reset to running; the agent loop appends to the same board.
+	started := time.Now().UTC()
+	_ = h.Stores.Runs.Update(c.Request.Context(), &store.Run{
+		ID: run.ID, Status: "running", StartedAt: started, EndedAt: nil,
+	})
+	go h.startAgent(run, target.Value)
+	c.JSON(http.StatusAccepted, gin.H{"ok": true, "run_id": run.ID, "status": "running"})
+}
+
 // startAgent asks the Python sidecar to start the run and then
 // subscribes to its SSE stream. If either call fails we mark the run as
 // failed in the store so the UI can surface a useful error.

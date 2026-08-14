@@ -119,7 +119,15 @@ async def readyz() -> dict[str, object]:
 @app.post("/v1/runs", status_code=202)
 async def start_run(body: StartRunBody) -> JSONResponse:
     if body.run_id in RUNS:
-        raise HTTPException(status_code=409, detail=f"run_id `{body.run_id}` already exists")
+        # Continue: the same run is being resumed from its durable board.
+        # Drop the old in-memory run (the Python agent's live state), and
+        # start a fresh agent loop that re-reads the board (facts/intents)
+        # instead of a stale message history. This is how we "go deeper"
+        # without the context growing forever.
+        old = RUNS.pop(body.run_id, None)
+        if old is not None and old.task is not None and not old.task.done():
+            old.task.cancel()
+        QUEUES.pop(body.run_id, None)
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
     run = AgentRun(

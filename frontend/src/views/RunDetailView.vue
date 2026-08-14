@@ -89,6 +89,18 @@ function fmtTime(s?: string) {
   try { return new Date(s).toLocaleString() } catch { return s }
 }
 
+async function continueRun() {
+  if (!confirm('从当前黑板状态继续深入这个 run？(保留已发现的 facts/intents，开启新一轮挖掘)')) return
+  try {
+    await api.post(`/runs/${runId.value}/continue`)
+    status.value = 'running'
+    await loadRun()
+    connectSSE()
+  } catch (e: any) {
+    alert('继续失败: ' + (e?.response?.data?.error || e?.message))
+  }
+}
+
 async function loadRun() {
   try {
     const res = await api.get(`/runs/${runId.value}`)
@@ -172,6 +184,7 @@ watch(runId, async (v) => {
       <div class="row">
         <h2 style="font-size: 16px; font-weight: 600; margin: 0">Run <code>{{ runId.slice(0, 8) }}</code></h2>
         <UiBadge kind="status" :value="status" :dot="true" />
+        <button v-if="['success','completed','failed','cancelled'].includes(status)" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="continueRun">继续深入</button>
       </div>
       <div class="run-tokens">
         <UiProgress v-if="totalTokens > 0" :value="totalTokens" :max="Math.max(totalTokens, 1)" tone="accent" label="tokens" />

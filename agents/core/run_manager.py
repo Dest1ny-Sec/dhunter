@@ -62,6 +62,8 @@ class RunManager:
 
     async def execute(self) -> None:
         self.run.status = "running"
+        self.run.summary = ""
+        self.run.error = None
         try:
             await asyncio.wait_for(self._loop(), timeout=OVERALL_TIMEOUT)
         except asyncio.TimeoutError:
@@ -296,7 +298,8 @@ class RunManager:
         if not self.max_run_tokens or self.max_run_tokens <= 0:
             return False
         r = graph.get("run") or {}
-        used = int(r.get("input_tokens") or 0) + int(r.get("output_tokens") or 0) + int(r.get("cache_read_input_tokens") or 0)
+        # Cache reads are cheap (prompt-cache reuse); count real spend only.
+        used = int(r.get("input_tokens") or 0) + int(r.get("output_tokens") or 0)
         return used >= self.max_run_tokens
 
     async def _seed_origin_goal(self) -> None:
