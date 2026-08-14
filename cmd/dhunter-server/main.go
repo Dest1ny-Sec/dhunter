@@ -129,6 +129,14 @@ func main() {
 		// Platform status — lets the UI self-describe the bundled services
 		// instead of asking the user to configure them by hand. The server
 		// probes its own MCP + agent sidecars (the browser can't, cross-origin).
+		// Platform settings — LLM config import/test, token budget.
+		settingsH := handler.NewSettingsHandler(stores)
+		api.GET("/settings/llm", settingsH.GetLLM)
+		api.PUT("/settings/llm", settingsH.SaveLLM)
+		api.POST("/settings/llm/test", settingsH.TestLLM)
+		api.GET("/settings/budget", settingsH.GetBudget)
+		api.PUT("/settings/budget", settingsH.SaveBudget)
+
 		api.GET("/status", func(c *gin.Context) {
 			hc := &http.Client{Timeout: 3 * time.Second}
 			probe := func(url string) string {

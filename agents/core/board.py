@@ -70,6 +70,22 @@ class BoardClient:
             raise BoardError(f"get_target http {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
+    async def get_llm_config(self) -> dict[str, Any]:
+        """Fetch the platform's saved LLM config (empty dict if none)."""
+        resp = await self._request("GET", "/api/settings/llm")
+        if resp.status_code >= 400:
+            return {}
+        data = resp.json()
+        return data or {}
+
+    async def get_budget(self) -> dict[str, Any]:
+        """Fetch the per-run token budget red line."""
+        try:
+            resp = await self._request("GET", "/api/settings/budget")
+            return resp.json() if resp.status_code < 400 else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     async def create_fact(self, run_id: str, description: str, source: str = "agent") -> str:
         resp = await self._request("POST", f"/api/runs/{run_id}/facts", json={"description": description, "source": source})
         if resp.status_code >= 400:

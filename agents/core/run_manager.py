@@ -54,6 +54,7 @@ class RunManager:
         self.reason_rounds = 0
         self.started = time.monotonic()
         self.run_auth: dict[str, Any] | None = None
+        self.max_run_tokens = 0
         self._last_verify = time.monotonic()
 
     # --- lifecycle ------------------------------------------------------
@@ -92,9 +93,16 @@ class RunManager:
     async def _loop(self) -> None:
         await self._seed_origin_goal()
         await self._load_auth()
+        await self._load_llm_config()
+        await self._load_budget()
         converged = False
         while time.monotonic() - self.started < OVERALL_TIMEOUT:
             graph = await self.board.graph(self.run.run_id)
+            # token budget red line
+            if await self._budget_exhausted(graph):
+                self.run.summary = f"token budget red line reached ({self.max_run_tokens} tokens)"
+                log.warning("run %s: token budget red line reached (%s)", self.run.run_id, self.max_run_tokens)
+                break
             open_its = [i for i in (graph.get("intents") or []) if i.get("status") == "open"]
 
             # reap finished workers
@@ -165,6 +173,48 @@ class RunManager:
         self.run.status = "success"
         self.run.summary = summary
         await self.run.emit("run_done", {"status": "success", "summary": summary})
+
+    async def _load_llm_config(self) -> None:
+        """Use the LLM config saved in the platform (ccswitch-style import)
+        if one exists; it overrides the process env for this run."""
+        try:
+            resp = await self.board.get_llm_config()
+        except Exception as e:  # noqa: BLE001
+            log.warning("run %s: no saved llm config: %s", self.run.run_id, e)
+            return
+        if not resp:
+            return
+        model = resp.get("model") or ""
+        base_url = resp.get("base_url") or ""
+        api_key = resp.get("api_key") or ""
+        if model and base_url and api_key:
+            os.environ["DHUNTER_LLM_MODEL"] = model
+            os.environ["DHUNTER_LLM_BASE_URL"] = base_url
+            os.environ["DHUNTER_LLM_KEY"] = api_key
+            if resp.get("provider"):
+                os.environ["DHUNTER_LLM_PROVIDER"] = resp["provider"]
+            if resp.get("max_tokens"):
+                os.environ["DHUNTER_LLM_MAX_TOKENS"] = str(resp["max_tokens"])
+            log.info("run %s: using saved LLM config: %s @ %s", self.run.run_id, model, base_url)
+
+    async def _load_budget(self) -> None:
+        """Load the per-run token budget red line (0 = unlimited)."""
+        self.max_run_tokens = 0
+        try:
+            resp = await self.board.get_budget()
+            self.max_run_tokens = int(resp.get("max_run_tokens") or 0)
+            if self.max_run_tokens > 0:
+                log.info("run %s: token budget red line = %s", self.run.run_id, self.max_run_tokens)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _budget_exhausted(self, graph: dict[str, Any]) -> bool:
+        """True when cumulative run tokens exceed the configured budget."""
+        if not self.max_run_tokens or self.max_run_tokens <= 0:
+            return False
+        r = graph.get("run") or {}
+        used = int(r.get("input_tokens") or 0) + int(r.get("output_tokens") or 0) + int(r.get("cache_read_input_tokens") or 0)
+        return used >= self.max_run_tokens
 
     async def _seed_origin_goal(self) -> None:
         try:

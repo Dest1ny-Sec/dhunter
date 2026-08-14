@@ -133,6 +133,12 @@ var migrations = []string{
 		created_at INTEGER NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_hints_run ON hints(run_id);`,
+
+	// settings — simple key/value store (LLM config, token budget, etc.)
+	`CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL DEFAULT ''
+	);`,
 }
 
 // Migrate runs every DDL statement in order, then applies per-column

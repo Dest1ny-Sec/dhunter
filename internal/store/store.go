@@ -134,6 +134,7 @@ type Stores struct {
 	ToolCalls *ToolCallStore
 	Findings  *FindingStore
 	Board     *Board
+	Settings  *SettingsStore
 }
 
 // New constructs every store over the shared *db.DB.
@@ -147,6 +148,7 @@ func New(database *db.DB) *Stores {
 		ToolCalls: &ToolCallStore{db: database},
 		Findings:  &FindingStore{db: database},
 		Board:     newBoard(database),
+		Settings:  &SettingsStore{db: database},
 	}
 }
 
@@ -734,6 +736,33 @@ func (s *FindingStore) Append(ctx context.Context, f *Finding) error {
 		`INSERT INTO findings (id, run_id, vuln_id, category, severity_score, summary, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, f.RunID, vulnID, f.Category, f.SeverityScore, f.Summary, f.CreatedAt.UnixMilli())
+	return err
+}
+
+// ----- SettingsStore -----
+
+// SettingsStore is a simple key/value store for platform settings
+// (LLM config, token budget, etc.).
+type SettingsStore struct{ db *db.DB }
+
+// Get returns a setting value ("" if unset).
+func (s *SettingsStore) Get(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return v, nil
+}
+
+// Set stores a setting value (upsert).
+func (s *SettingsStore) Set(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
 }
 
