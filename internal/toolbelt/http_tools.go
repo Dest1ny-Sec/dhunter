@@ -86,13 +86,50 @@ func apiFuzz(ctx context.Context, args map[string]interface{}) toolResult {
 	}
 	client := httpClient(argBool(args, "insecure", false), 10*time.Second, 3)
 
-	// baseline (plain GET to the target)
-	baseReq, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
+	// buildRequest constructs a request for the given param_loc with the
+	// param set to `value`. Used for both the baseline (empty value) and the
+	// fuzz variants so the comparison is apples-to-apples.
+	buildRequest := func(value string) (*http.Request, error) {
+		var (
+			u    = target
+			meth = "GET"
+			bd   io.Reader
+			ct   string
+		)
+		switch paramLoc {
+		case "query":
+			if pu, err := url.Parse(target); err == nil {
+				q := pu.Query()
+				q.Set(paramName, value)
+				pu.RawQuery = q.Encode()
+				u = pu.String()
+			}
+		case "body":
+			meth = "POST"
+			ct = "application/x-www-form-urlencoded"
+			bd = strings.NewReader(url.Values{paramName: {value}}.Encode())
+		}
+		req, err := http.NewRequestWithContext(ctx, meth, u, bd)
+		if err != nil {
+			return nil, err
+		}
+		if ct != "" {
+			req.Header.Set("Content-Type", ct)
+		}
+		if paramLoc == "header" {
+			req.Header.Set(paramName, value)
+		}
+		return req, nil
+	}
+
+	// baseline — same method/loc as the fuzz variants (empty param value).
 	baseStatus, baseSize := 0, 0
-	if br, err := client.Do(baseReq); err == nil {
-		b, _ := io.ReadAll(io.LimitReader(br.Body, 4096))
-		baseStatus, baseSize = br.StatusCode, len(b)
-		br.Body.Close()
+	if baseReq, err := buildRequest(""); err == nil {
+		if br, err := client.Do(baseReq); err == nil {
+			b, _ := io.ReadAll(io.LimitReader(br.Body, 4096))
+			baseStatus, baseSize = br.StatusCode, len(b)
+			br.Body.Close()
+		}
 	}
 
 	type hit struct {
@@ -114,34 +151,9 @@ func apiFuzz(ctx context.Context, args map[string]interface{}) toolResult {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			var (
-				u    = target
-				meth = "GET"
-				bd   io.Reader
-				ct   string
-			)
-			switch paramLoc {
-			case "query":
-				if pu, err := url.Parse(target); err == nil {
-					q := pu.Query()
-					q.Set(paramName, payload)
-					pu.RawQuery = q.Encode()
-					u = pu.String()
-				}
-			case "body":
-				meth = "POST"
-				ct = "application/x-www-form-urlencoded"
-				bd = strings.NewReader(url.Values{paramName: {payload}}.Encode())
-			}
-			req, err := http.NewRequestWithContext(ctx, meth, u, bd)
+			req, err := buildRequest(payload)
 			if err != nil {
 				return
-			}
-			if ct != "" {
-				req.Header.Set("Content-Type", ct)
-			}
-			if paramLoc == "header" {
-				req.Header.Set(paramName, payload)
 			}
 			resp, err := client.Do(req)
 			if err != nil {

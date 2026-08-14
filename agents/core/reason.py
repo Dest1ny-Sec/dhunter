@@ -34,6 +34,7 @@ async def run_reason_step(
     system_prompt: str,
     *,
     max_intents: int = MAX_REASON_INTENTS,
+    llm_config: dict[str, Any] | None = None,
 ) -> tuple[str, Any]:
     """One reason turn. Returns (kind, payload)."""
     graph = await board.graph(run.run_id)
@@ -50,7 +51,7 @@ async def run_reason_step(
         f"Return JSON: {{'kind': 'intents'|'noop'|'complete', ...}} at most {max_intents} intents."
     )
 
-    text = await call_llm_text(run, system=system_prompt, user_content=user_content)
+    text = await call_llm_text(run, system=system_prompt, user_content=user_content, llm_config=llm_config)
     parsed = parse_json_object(text)
     kind = parsed.get("kind")
 

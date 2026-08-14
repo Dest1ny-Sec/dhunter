@@ -28,9 +28,13 @@ type Config struct {
 
 // ServerConfig controls the HTTP server.
 type ServerConfig struct {
-	Port                int    `yaml:"port"`
-	Host                string `yaml:"host"`
-	SSEKeepaliveSeconds int    `yaml:"sse_keepalive_seconds"`
+	Port                int      `yaml:"port"`
+	Host                string   `yaml:"host"`
+	SSEKeepaliveSeconds int      `yaml:"sse_keepalive_seconds"`
+	// AllowedOrigins restricts CORS. Empty = same-origin only (the default
+	// single-port deployment needs no CORS at all). Set e.g.
+	// ["https://ui.example.com"] for a separate frontend host.
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 // AgentConfig points to the Python sidecar that runs the LLM loop.
@@ -77,6 +81,7 @@ func Default() *Config {
 			Port:                8080,
 			Host:                "127.0.0.1",
 			SSEKeepaliveSeconds: 15,
+			AllowedOrigins:      []string{},
 		},
 		Agent: AgentConfig{
 			PythonURL: "http://127.0.0.1:9100",

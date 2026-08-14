@@ -89,7 +89,7 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(requestLogger())
-	router.Use(corsForDev())
+	router.Use(corsForOrigins(cfg.Server.AllowedOrigins))
 
 	mountWebUI(router)
 	router.GET("/api/healthz", handler.Healthz)
@@ -193,6 +193,11 @@ func main() {
 		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 		Handler:           router,
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		// WriteTimeout is reset to zero per-request for SSE streams (see the
+		// SSE handler); 60s guards regular API endpoints against slow clients.
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -304,17 +309,26 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-// corsForDev allows any origin. The MVP ships a single-binary sidecar
-// model; browsers are expected to be on the same machine. A future
-// release will restrict this to the configured web origin.
-func corsForDev() gin.HandlerFunc {
+// corsForOrigins restricts CORS to the configured origins. With no origins
+// configured (the default single-port deployment) no CORS headers are sent
+// at all — same-origin requests work fine and cross-origin is denied.
+func corsForOrigins(allowed []string) gin.HandlerFunc {
+	allowedSet := map[string]struct{}{}
+	for _, o := range allowed {
+		allowedSet[o] = struct{}{}
+	}
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
+		if len(allowedSet) > 0 {
+			origin := c.GetHeader("Origin")
+			if _, ok := allowedSet[origin]; ok {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+				c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			}
+			if c.Request.Method == http.MethodOptions {
+				c.AbortWithStatus(http.StatusNoContent)
+				return
+			}
 		}
 		c.Next()
 	}

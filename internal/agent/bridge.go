@@ -188,12 +188,32 @@ func (b *Bridge) Subscribe(ctx context.Context, runID string) error {
 // already understands.
 func (b *Bridge) consumeSSE(ctx context.Context, runID string, r io.Reader) error {
 	br := newSSEReader(r)
+	// Streaming text (reasoning_delta / response_delta) is fanned out live to
+	// browsers but COALESCED for storage: one message row per turn instead of
+	// one per delta chunk, so long runs don't bloat the messages table.
+	streamBuf := ""
+	streamType := ""
+	flush := func() {
+		if streamBuf == "" {
+			return
+		}
+		ev := &Event{EventType: streamType, RunID: runID, Role: "assistant", Content: streamBuf}
+		if streamType == EventReasoningDelta {
+			ev.Role = "reasoning"
+		}
+		rawJSON, _ := json.Marshal(ev)
+		b.handle(ctx, ev, rawJSON)
+		streamBuf = ""
+		streamType = ""
+	}
 	for {
 		se, err := br.ReadEvent()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				flush()
 				return nil
 			}
+			flush()
 			return err
 		}
 		if se.Name == "" && len(se.Data) == 0 {
@@ -201,15 +221,31 @@ func (b *Bridge) consumeSSE(ctx context.Context, runID string, r io.Reader) erro
 		}
 		// [DONE] sentinel — sidecar uses it to close the stream.
 		if bytes.Equal(se.Data, []byte("[DONE]")) {
+			flush()
 			return nil
 		}
 		var payload map[string]interface{}
 		if err := json.Unmarshal(se.Data, &payload); err != nil {
-			// Drop unparseable events but keep streaming.
 			continue
 		}
 		ev := mapPayloadToEvent(se.Name, runID, payload)
-		// Re-encode to a flat JSON for fan-out + storage.
+		if ev.EventType == EventReasoningDelta || ev.EventType == EventResponseDelta {
+			// Live fan-out now; buffer the text for coalesced storage.
+			rawJSON, _ := json.Marshal(ev)
+			b.hub.Publish(runID, rawJSON)
+			if ev.EventType == EventReasoningDelta {
+				// mapPayloadToEvent sets Content to accumulated || delta; the
+				// agent sends accumulated="" + per-chunk delta, so append.
+				streamBuf += ev.Content
+			} else {
+				// response_delta carries the full accumulated text; keep the
+				// latest as the coalesced content.
+				streamBuf = ev.Content
+			}
+			streamType = ev.EventType
+			continue
+		}
+		flush()
 		rawJSON, _ := json.Marshal(ev)
 		b.handle(ctx, ev, rawJSON)
 	}

@@ -97,7 +97,7 @@ or
 """
 
 
-async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str) -> None:
+async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, llm_config: dict[str, Any] | None = None) -> None:
     if not VERIFY_ENABLED:
         return
     try:
@@ -113,7 +113,7 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str) ->
 
     confirmed, dismissed = 0, 0
     for v in pending:
-        verdict, reason, severity = await _judge(run, system_prompt, v)
+        verdict, reason, severity = await _judge(run, system_prompt, v, llm_config=llm_config)
         try:
             if verdict:
                 # Also correct inflated severities from the LLM.
@@ -132,7 +132,7 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str) ->
         log.info("verifier: run %s -> %s confirmed, %s dismissed", run.run_id, confirmed, dismissed)
 
 
-async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any]) -> tuple[bool, str, str]:
+async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_config: dict[str, Any] | None = None) -> tuple[bool, str, str]:
     """Returns (confirmed, reason, llm_severity)."""
     title = (v.get("title") or "")
     evidence = (v.get("evidence") or "")
@@ -152,7 +152,7 @@ async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any]) -> tuple[
         reproduction=(v.get("reproduction") or "")[:3000],
     )
     try:
-        text = await call_llm_text(run, system=system_prompt, user_content=user_content)
+        text = await call_llm_text(run, system=system_prompt, user_content=user_content, llm_config=llm_config)
     except Exception as e:  # noqa: BLE001
         log.warning("verifier: judge call failed for %s: %s", v.get("id"), e)
         return False, "verifier LLM call failed", "info"

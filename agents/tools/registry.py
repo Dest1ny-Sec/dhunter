@@ -333,14 +333,23 @@ class ToolRegistry:
         await self.mcp.aclose()
 
     def all_tools(self) -> list[dict[str, Any]]:
-        """Anthropic-format tool list (with `input_schema`)."""
+        """Anthropic-format tool list (with `input_schema`).
+
+        MCP tools that duplicate a fallback tool (http_request / write_finding
+        / write_fact) are dropped so the LLM never sees two same-named tools
+        — the fallback wins because it carries the run context (run_id).
+        """
         tools: list[dict[str, Any]] = [dict(t) for t in _FALLBACK_TOOL_DEFS]
+        fallback_names = {t["name"] for t in _FALLBACK_TOOL_DEFS}
         for t in self._mcp_tools:
+            name = t.get("name") or ""
+            if name in fallback_names:
+                continue
             schema = t.get("inputSchema") or t.get("input_schema") or {"type": "object", "properties": {}}
             if not isinstance(schema, dict):
                 schema = {"type": "object", "properties": {}}
             tools.append({
-                "name": t.get("name") or "",
+                "name": name,
                 "description": t.get("description") or "",
                 "input_schema": schema,
             })

@@ -79,10 +79,15 @@ async def run_tool_loop(
     user_content: str,
     max_iterations: int = MAX_ITERATIONS,
     step_timeout: float = STEP_TIMEOUT,
+    llm_config: dict[str, Any] | None = None,
 ) -> str:
     """Drive one worker's exploration: LLM turns interleaved with tool
     calls until the model stops requesting tools. Returns the final text
-    summary (used as the intent's conclusion)."""
+    summary (used as the intent's conclusion).
+
+    `llm_config` (provider/base_url/model/api_key/max_tokens) is threaded
+    through per-run so concurrent runs never clobber each other's config
+    (we deliberately do NOT mutate the process environment)."""
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_content}]
     final_text_parts: list[str] = []
 
@@ -99,7 +104,7 @@ async def run_tool_loop(
 
         try:
             async with asyncio.timeout(step_timeout):
-                async for ev in stream_chat(system=system, messages=messages, tools=tools):
+                async for ev in stream_chat(system=system, messages=messages, tools=tools, **(llm_config or {})):
                     t = ev.type
                     if t == "content_block_start":
                         block = ev.data.get("content_block") or {}
@@ -202,13 +207,14 @@ async def call_llm_text(
     system: str,
     user_content: str,
     step_timeout: float = STEP_TIMEOUT,
+    llm_config: dict[str, Any] | None = None,
 ) -> str:
     """A single tool-less LLM turn that returns the accumulated text.
     Used by the reason step and the vulnerability verifier."""
     buf = ""
     try:
         async with asyncio.timeout(step_timeout):
-            async for ev in stream_chat(system=system, messages=[{"role": "user", "content": user_content}]):
+            async for ev in stream_chat(system=system, messages=[{"role": "user", "content": user_content}], **(llm_config or {})):
                 if ev.type == "content_block_delta":
                     delta = ev.data.get("delta") or {}
                     if delta.get("type") == "text_delta":

@@ -55,6 +55,7 @@ class RunManager:
         self.started = time.monotonic()
         self.run_auth: dict[str, Any] | None = None
         self.max_run_tokens = 0
+        self.llm_config: dict[str, Any] | None = None
         self._last_verify = time.monotonic()
 
     # --- lifecycle ------------------------------------------------------
@@ -131,7 +132,7 @@ class RunManager:
                 task = asyncio.create_task(
                     run_explore_worker(
                         self.run, self.board, self.registry, self.system_prompt,
-                        intent, worker_name, auth_context=self.run_auth,
+                        intent, worker_name, auth_context=self.run_auth, llm_config=self.llm_config,
                     ),
                     name=f"explore-{self.run.run_id}-{iid}",
                 )
@@ -150,7 +151,7 @@ class RunManager:
             # surface while the run is still digging.
             if time.monotonic() - self._last_verify > VERIFY_INTERVAL:
                 self._last_verify = time.monotonic()
-                await run_verifier(self.run, self.board, self.system_prompt)
+                await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
 
             # wait for progress (or a short tick)
             if self.workers:
@@ -166,7 +167,7 @@ class RunManager:
             raise RuntimeError(f"overall timeout ({int(OVERALL_TIMEOUT)}s) exceeded")
 
         # Quality gate: independently re-judge every pending finding.
-        await run_verifier(self.run, self.board, self.system_prompt)
+        await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
 
         # final summary from the board
         summary = await self._build_summary()
@@ -176,7 +177,9 @@ class RunManager:
 
     async def _load_llm_config(self) -> None:
         """Use the LLM config saved in the platform (ccswitch-style import)
-        if one exists; it overrides the process env for this run."""
+        if one exists. Stored per-run on self.llm_config and threaded through
+        the call chain — we never mutate os.environ so concurrent runs with
+        different providers don't clobber each other."""
         try:
             resp = await self.board.get_llm_config()
         except Exception as e:  # noqa: BLE001
@@ -188,13 +191,13 @@ class RunManager:
         base_url = resp.get("base_url") or ""
         api_key = resp.get("api_key") or ""
         if model and base_url and api_key:
-            os.environ["DHUNTER_LLM_MODEL"] = model
-            os.environ["DHUNTER_LLM_BASE_URL"] = base_url
-            os.environ["DHUNTER_LLM_KEY"] = api_key
-            if resp.get("provider"):
-                os.environ["DHUNTER_LLM_PROVIDER"] = resp["provider"]
-            if resp.get("max_tokens"):
-                os.environ["DHUNTER_LLM_MAX_TOKENS"] = str(resp["max_tokens"])
+            self.llm_config = {
+                "model": model,
+                "base_url": base_url,
+                "api_key": api_key,
+                "provider": resp.get("provider") or "",
+                "max_tokens": int(resp.get("max_tokens") or 8192),
+            }
             log.info("run %s: using saved LLM config: %s @ %s", self.run.run_id, model, base_url)
 
     async def _load_budget(self) -> None:
@@ -270,7 +273,7 @@ class RunManager:
             log.info("run %s: reason round cap (%s) reached, converging", self.run.run_id, MAX_REASON_ROUNDS)
             return "noop"
         log.info("run %s: reason round %s", self.run.run_id, self.reason_rounds)
-        kind, payload = await run_reason_step(self.run, self.board, self.system_prompt)
+        kind, payload = await run_reason_step(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
         if kind == "intents":
             log.info("run %s: reason proposed %s new intents", self.run.run_id, payload)
             return "intents"

@@ -66,6 +66,7 @@ async def run_explore_worker(
     intent: dict[str, Any],
     worker_name: str,
     auth_context: dict[str, Any] | None = None,
+    llm_config: dict[str, Any] | None = None,
 ) -> str | None:
     """Return the concluded fact description, or None if not concluded."""
     intent_id = intent.get("id", "?")
@@ -94,7 +95,7 @@ async def run_explore_worker(
             "Use tools, record findings, then summarize what you confirmed."
         )
 
-        conclusion = await run_tool_loop(run, registry, system=system_prompt, user_content=user_content)
+        conclusion = await run_tool_loop(run, registry, system=system_prompt, user_content=user_content, llm_config=llm_config)
         conclusion = (conclusion or "").strip()
         if len(conclusion) > MAX_CONCLUSION_CHARS:
             conclusion = conclusion[:MAX_CONCLUSION_CHARS] + "…"
