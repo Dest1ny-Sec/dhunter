@@ -101,7 +101,7 @@ def test_reason_complete_converges():
 def test_noop_on_empty_board_forces_bootstrap_recon():
     """An LLM nooping on an empty board must NOT converge the run empty —
     the engine injects a bootstrap recon intent instead."""
-    _patch_llm(reason_response='{"kind": "noop"}', explore_response="Found the login page and an API endpoint.")
+    _patch_llm(reason_resp='{"kind": "noop"}', explore_resp="Found the login page and an API endpoint.")
 
     async def scenario():
         run = _make_run(run_id="test-bootstrap")
