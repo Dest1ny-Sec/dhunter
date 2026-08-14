@@ -37,10 +37,10 @@ async function sendHint() {
   try {
     await api.post(`/runs/${props.runId}/hints`, { content, creator: 'operator' })
     hintText.value = ''
-    hintMsg.value = 'hint sent ✓'
+    hintMsg.value = '提示已发送 ✓'
     setTimeout(() => (hintMsg.value = ''), 2000)
   } catch (e: any) {
-    hintMsg.value = `failed: ${e?.message || 'error'}`
+    hintMsg.value = `发送失败: ${e?.message || 'error'}`
   }
 }
 
@@ -59,10 +59,11 @@ const FactNode = markRaw(
     setup(props) {
       return () => {
         const src = (props.data as any)?.source || 'agent'
+        const srcLabel = src === 'origin' ? '目标起点' : src === 'goal' ? '目标' : src.startsWith('intent:') ? '意图结论' : '智能体发现'
         return h('div', { class: ['vf-node', `fact-${src}`], 'data-id': props.id }, [
           h('div', { class: 'vf-id' }, String(props.id).slice(0, 10)),
           h('div', { class: 'vf-desc' }, String((props.data as any)?.description || '').slice(0, 90)),
-          h('div', { class: 'vf-src' }, src),
+          h('div', { class: 'vf-src' }, srcLabel),
         ])
       }
     },
@@ -76,10 +77,11 @@ const IntentNode = markRaw(
       return () => {
         const d = props.data as any
         const status = d?.status || 'open'
+        const stMap: Record<string, string> = { open: '待执行', claimed: '进行中', concluded: '已完成', failed: '死路' }
         return h('div', { class: ['vf-node', 'intent-node', `intent-${status}`], 'data-id': props.id }, [
-          h('div', { class: 'vf-status' }, status),
+          h('div', { class: 'vf-status' }, stMap[status] || status),
           h('div', { class: 'vf-desc' }, String(d?.description || '').slice(0, 90)),
-          h('div', { class: 'vf-src' }, d?.worker ? `worker ${d.worker}` : 'unclaimed'),
+          h('div', { class: 'vf-src' }, d?.worker ? `worker ${d.worker}` : '未认领'),
         ])
       }
     },
@@ -163,17 +165,17 @@ function onNodeClick({ node }: any) {
   }
 }
 
-const statusLabel: Record<string, string> = { open: 'open', claimed: 'working…', concluded: 'done', failed: 'dead end' }
+const statusLabel: Record<string, string> = { open: '待执行', claimed: '进行中', concluded: '已完成', failed: '死路' }
 </script>
 
 <template>
   <div class="board">
     <div class="board-head">
       <div class="board-title">
-        <strong>Attack Graph</strong>
-        <span class="muted" style="font-size: 11px">{{ facts.length }} facts · {{ intents.length }} intents · {{ hints.length }} hints</span>
+        <strong>攻击链路图</strong>
+        <span class="muted" style="font-size: 11px">{{ facts.length }} 事实 · {{ intents.length }} 意图 · {{ hints.length }} 提示</span>
       </div>
-      <button v-if="nodes.length" class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="() => fitView()">Fit view</button>
+      <button v-if="nodes.length" class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="() => fitView()">适应视图</button>
     </div>
 
     <div class="graph-wrap">
@@ -197,24 +199,24 @@ const statusLabel: Record<string, string> = { open: 'open', claimed: 'working…
     <div v-if="selected" class="detail-panel">
       <div class="detail-head">
         <span class="pill small" :class="selected.kind === 'fact' ? 'confirmed' : (selected.data?.status || 'open')">
-          {{ selected.kind === 'fact' ? 'fact' : statusLabel[selected.data?.status] || selected.data?.status }}
+          {{ selected.kind === 'fact' ? '事实' : statusLabel[selected.data?.status] || selected.data?.status }}
         </span>
         <button class="ghost" style="min-height: 24px; padding: 0 6px" @click="selected = null">✕</button>
       </div>
       <div v-if="selected.kind === 'fact'">
         <div class="detail-desc">{{ selected.data?.description }}</div>
-        <div class="muted" style="font-size: 11px; margin-top: 6px">source: {{ selected.data?.source }} · {{ selected.data?.id }}</div>
+        <div class="muted" style="font-size: 11px; margin-top: 6px">来源: {{ selected.data?.source }} · {{ selected.data?.id }}</div>
       </div>
       <div v-else>
         <div class="detail-desc">{{ selected.data?.description }}</div>
         <div class="muted" style="font-size: 11px; margin-top: 6px">
-          {{ selected.data?.worker ? `worker: ${selected.data.worker}` : 'unclaimed' }} · {{ selected.data?.id }}
+          {{ selected.data?.worker ? `工作线程: ${selected.data.worker}` : '未认领' }} · {{ selected.data?.id }}
         </div>
       </div>
     </div>
 
     <div class="hint-block">
-      <div class="muted" style="font-size: 11px">Hints (inject guidance the AI reads next turn)</div>
+      <div class="muted" style="font-size: 11px">提示（注入给 AI 下一轮读取的指引）</div>
       <div class="hint-input">
         <input v-model="hintText" placeholder="e.g. try /actuator/env, use admin/admin creds…" @keyup.enter="sendHint" />
         <button class="primary" style="min-height: 34px" @click="sendHint">Send</button>

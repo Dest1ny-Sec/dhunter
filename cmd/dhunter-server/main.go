@@ -5,9 +5,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -105,6 +107,7 @@ func main() {
 		api.GET("/targets/:id", targetH.Get)
 		api.PATCH("/targets/:id/auth", targetH.SetAuth)
 		api.PATCH("/targets/:id/redlines", targetH.SetRedLines)
+		api.DELETE("/targets/:id", targetH.Delete)
 
 		runH := handler.NewRunHandler(stores, bridge, hub)
 		api.POST("/runs", runH.Create)
@@ -159,7 +162,7 @@ func main() {
 					"base_url": cfg.LLM.BaseURL,
 					"key_set":  cfg.LLM.APIKey != "",
 				},
-				"mcp":   gin.H{"url": cfg.MCP.WebHunter.URL, "status": probe(mcpBase + "/health")},
+				"mcp":   gin.H{"url": cfg.MCP.WebHunter.URL, "status": probe(mcpBase + "/health"), "tools": listMCPTools(cfg.MCP.WebHunter.URL, cfg.MCP.WebHunter.Token)},
 				"agent": gin.H{"url": agentURL, "status": probe(agentURL + "/healthz")},
 				"db":    gin.H{"path": cfg.Storage.SQLitePath},
 			})
@@ -387,3 +390,40 @@ func mountWebUI(router *gin.Engine) {
 }
 
 var _ = filepath.Join // keep filepath import if future flags need it
+
+// listMCPTools queries the bundled MCP server for its tool names (used by
+// the Settings page to show the toolbelt).
+func listMCPTools(mcpURL, token string) []string {
+	type rpcReq struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Method  string `json:"method"`
+	}
+	body, _ := json.Marshal(rpcReq{JSONRPC: "2.0", ID: 1, Method: "tools/list"})
+	req, _ := http.NewRequest("POST", mcpURL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(out.Result.Tools))
+	for _, t := range out.Result.Tools {
+		names = append(names, t.Name)
+	}
+	return names
+}

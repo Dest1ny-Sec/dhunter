@@ -99,3 +99,12 @@ Commercial. See `LICENSE` for terms. This product is not affiliated with, endors
 - v1.3 — Report templates (import `.md` / `.docx` with placeholders)
 - v1.4 — Multi-target runs in parallel
 - v2.0 — Team mode, RBAC, audit log, deployment telemetry
+
+
+## Cross-platform
+
+- **macOS / Linux**: `./scripts/start-dhunter.sh start`
+- **Windows**: `powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start`
+- **Any (Docker)**: `docker build -t dhunter . && docker run -p 13343:13343 -e DHUNTER_LLM_KEY=sk-... dhunter`
+
+The server, MCP toolbelt, and agent are all cross-platform (pure-Go binaries + Python).

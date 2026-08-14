@@ -87,18 +87,8 @@ function logout() {
     <header class="app-header">
       <h1 class="page-title">{{ (route.meta.title as string) || 'Dhunter' }}</h1>
       <div class="spacer" />
-      <div class="header-search">
-        <span class="search-icon">⚲</span>
-        <input type="text" placeholder="快速搜索..." />
-      </div>
-      <button class="header-action" title="任务通知">
-        <span>✉</span>
-        <span class="dot" />
-      </button>
-      <button class="header-action" title="告警">
-        <span>🔔</span>
-      </button>
-      <div class="header-avatar" :title="userLabel" @click="logout">{{ userInitial }}</div>
+      <span class="muted" style="font-size: 12px">{{ new Date().toLocaleDateString('zh-CN') }}</span>
+      <div class="header-avatar" :title="'退出登录'" @click="logout">{{ userInitial }}</div>
     </header>
 
     <main class="app-main">

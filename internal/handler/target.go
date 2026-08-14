@@ -44,6 +44,7 @@ var targetTypes = map[string]struct{}{
 type createTargetReq struct {
 	Input    string `json:"input"`
 	Type     string `json:"type"`
+	Name     string `json:"name"`
 	RedLines string `json:"red_lines"`
 }
 
@@ -91,6 +92,7 @@ func (h *TargetHandler) Create(c *gin.Context) {
 		Normalized: normalized,
 		Attributes: attrJSON,
 		RedLines:   strings.TrimSpace(req.RedLines),
+		Name:       strings.TrimSpace(req.Name),
 		CreatedAt:  time.Now().UTC(),
 	}
 	if err := h.Stores.Targets.Create(c.Request.Context(), t); err != nil {
@@ -168,6 +170,21 @@ func (h *TargetHandler) SetRedLines(c *gin.Context) {
 		return
 	}
 	if err := h.Stores.Targets.SetRedLines(c.Request.Context(), id, body.RedLines); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
+}
+
+// Delete handles DELETE /api/targets/:id — removes the target and all of
+// its runs, findings, and board state.
+func (h *TargetHandler) Delete(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.Stores.Targets.Delete(c.Request.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
 			return

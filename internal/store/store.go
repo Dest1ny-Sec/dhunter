@@ -37,6 +37,8 @@ type Target struct {
 	// RedLines are custom user rules/guardrails the agent MUST always follow
 	// (e.g. "禁止爆破", "只在授权范围", "不测支付接口"). Newline-separated.
 	RedLines  string    `json:"red_lines,omitempty"`
+	// Name is an optional human-friendly project name (falls back to Value).
+	Name      string    `json:"name,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -169,9 +171,9 @@ func (s *TargetStore) Create(ctx context.Context, t *Target) error {
 		t.Attributes = json.RawMessage(`{}`)
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, red_lines, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.RedLines, t.CreatedAt.UnixMilli())
+		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, red_lines, name, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.RedLines, t.Name, t.CreatedAt.UnixMilli())
 	return err
 }
 
@@ -200,10 +202,60 @@ func (s *TargetStore) SetRedLines(ctx context.Context, id, redLines string) erro
 	return nil
 }
 
+// Delete removes a target and everything tied to it (runs, vulns, board).
+func (s *TargetStore) Delete(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// find runs for cascade
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE target_id = ?`, id)
+	if err != nil {
+		return err
+	}
+	var runIDs []string
+	for rows.Next() {
+		var rid string
+		if err := rows.Scan(&rid); err != nil {
+			rows.Close()
+			return err
+		}
+		runIDs = append(runIDs, rid)
+	}
+	rows.Close()
+	for _, rid := range runIDs {
+		for _, q := range []string{
+			`DELETE FROM facts WHERE run_id = ?`,
+			`DELETE FROM intents WHERE run_id = ?`,
+			`DELETE FROM hints WHERE run_id = ?`,
+			`DELETE FROM messages WHERE run_id = ?`,
+			`DELETE FROM tool_calls WHERE run_id = ?`,
+			`DELETE FROM vulnerabilities WHERE run_id = ?`,
+			`DELETE FROM findings WHERE run_id = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, q, rid); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE target_id = ?`, id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM targets WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 // Get fetches a target by ID.
 func (s *TargetStore) Get(ctx context.Context, id string) (*Target, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, created_at FROM targets WHERE id = ?`, id)
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, created_at FROM targets WHERE id = ?`, id)
 	return scanTarget(row)
 }
 
@@ -213,7 +265,7 @@ func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, created_at FROM targets
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, created_at FROM targets
 		 ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -238,7 +290,7 @@ func scanTarget(r rowScanner) (*Target, error) {
 	var t Target
 	var attrs string
 	var createdMs int64
-	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &createdMs); err != nil {
+	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &t.Name, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

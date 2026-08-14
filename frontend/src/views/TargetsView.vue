@@ -11,6 +11,7 @@ const route = useRoute()
 
 const target = ref('')
 const targetType = ref<'auto' | 'company' | 'domain' | 'url' | 'ip'>('auto')
+const projName = ref('')
 const error = ref<string | null>(null)
 const loading = ref(false)
 const targets = ref<any[]>([])
@@ -81,7 +82,10 @@ async function start() {
   error.value = null
   loading.value = true
   try {
-    const tRes = await api.post('/targets', { input: target.value.trim(), type: targetType.value })
+    const tRes = await api.post('/targets', {
+      input: target.value.trim(), type: targetType.value,
+      name: projName.value.trim(),
+    })
     const targetId = tRes.data?.id
     if (!targetId) throw new Error('No target id returned')
 
@@ -112,6 +116,7 @@ async function start() {
 
 function resetForm() {
   target.value = ''
+  projName.value = ''
   authCookies.value = ''
   authHeaders.value = ''
   authNote.value = ''
@@ -137,6 +142,16 @@ function hasAuth(t: any): boolean {
 function newRun(t: any) {
   router.push(`/targets/${t.id}/runs`)
 }
+
+async function removeTarget(t: any) {
+  if (!confirm(`确定删除项目「${t.name || t.value || t.id}」？该项目所有扫描记录、漏洞成果和攻击链都会被删除。`)) return
+  try {
+    await api.delete(`/targets/${t.id}`)
+    await loadTargets()
+  } catch (e: any) {
+    alert('删除失败: ' + (e?.response?.data?.error || e?.message))
+  }
+}
 function viewRuns(t: any) {
   router.push(`/targets/${t.id}/runs`)
 }
@@ -161,6 +176,10 @@ onMounted(() => {
     <div v-if="showForm" class="card create-form">
       <div class="form-grid">
         <div>
+          <label class="field-label">项目名称（可选）</label>
+          <input v-model="projName" placeholder="例如：快手 SRC 渗透" style="width: 100%" />
+        </div>
+        <div>
           <label class="field-label">目标</label>
           <input v-model="target" :placeholder="placeholders[targetType]" style="width: 100%" @keyup.enter="start" />
         </div>
@@ -180,7 +199,7 @@ onMounted(() => {
         <textarea v-model="objective" rows="2" style="width: 100%" />
       </div>
       <details class="auth-details">
-        <summary>🔐 身份会话（可选）— 填写登录信息以测试鉴权后接口</summary>
+        <summary>身份会话（可选）— 填写登录信息以测试鉴权后接口</summary>
         <div class="auth-fields">
           <div>
             <label class="field-label">Cookie（粘贴 Cookie 头，例如 <code>sessionid=abc; uid=1</code>）</label>
@@ -197,7 +216,7 @@ onMounted(() => {
         </div>
       </details>
       <div>
-        <label class="field-label">🚫 红线 / 自定义要求（AI 每一轮都必须遵守，每行一条）</label>
+        <label class="field-label">红线 / 自定义要求（AI 每一轮都必须遵守，每行一条）</label>
         <textarea v-model="redLines" rows="2" style="width: 100%; font-size: 12.5px"
           placeholder="例如：禁止爆破/高频请求&#10;只在授权范围测试&#10;不测试支付/资金相关接口&#10;发现任何涉及用户数据的问题立即停止并上报" />
       </div>
@@ -214,18 +233,20 @@ onMounted(() => {
       <div v-for="t in targets" :key="t.id" class="eng-card card">
         <div class="eng-card-head">
           <span class="pill">{{ t.type || 'auto' }}</span>
-          <span v-if="hasAuth(t)" class="pill confirmed" title="authenticated session configured">🔐 auth</span>
+          <span v-if="hasAuth(t)" class="pill confirmed" title="已配置身份会话">已授权会话</span>
           <span class="spacer" />
           <span class="muted" style="font-size: 11px">{{ t.created_at ? new Date(t.created_at).toLocaleDateString() : '' }}</span>
         </div>
-        <div class="eng-card-value" @click="viewRuns(t)">{{ t.value || t.normalized || t.id }}</div>
-        <div class="eng-card-meta muted">{{ (sevByTarget[t.id] ? Object.entries(sevByTarget[t.id]).map(([s, c]) => `${s} ${c}`).join(' · ') : 'no findings') }}</div>
+        <div class="eng-card-value" @click="viewRuns(t)">{{ t.name || t.value || t.normalized || t.id }}</div>
+        <div v-if="t.name && t.name !== t.value" class="muted" style="font-size: 12px">{{ t.value || t.normalized }}</div>
+        <div class="eng-card-meta muted">{{ (sevByTarget[t.id] ? Object.entries(sevByTarget[t.id]).map(([s, c]) => `${s} ${c}`).join(' · ') : '暂无发现') }}</div>
         <div class="eng-card-foot">
           <UiBadge v-if="lastRun[t.id]" kind="status" :value="lastRun[t.id].status" :dot="true" />
           <span v-else class="muted" style="font-size: 11px">暂无运行</span>
           <span class="muted" style="font-size: 11px">{{ runCounts[t.id] || 0 }} 次运行</span>
           <span class="spacer" />
           <button class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="newRun(t)">新建运行</button>
+          <button class="ghost" style="min-height: 28px; padding: 0 8px; font-size: 12px; color: var(--danger)" @click="removeTarget(t)">删除</button>
           <button style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="viewRuns(t)">历史</button>
         </div>
       </div>
