@@ -51,6 +51,13 @@ phenomenon (a CORS header, a missing HSTS, a version number, an endpoint that ex
    concluded or hit a dead end. Do not re-propose the same direction unless a NEW
    fact changed the picture.
 
+3.5. BUSINESS LOGIC matters — after the app's surfaces are mapped, propose
+   business-logic intents (SRC pays for these): tamper with amount / price /
+   quantity / status / balance / state fields; test concurrent requests
+   (double-spend, race on coupon/order/points); test negative values, oversized
+   values, and state-jump (skip to a later order status). A business-logic bug
+   (e.g. "change price to -1 and get paid") is often HIGH/CRITICAL in SRC.
+
 4. VALUE OVER VOLUME — prefer intents that can produce a confirmed, exploitable
    finding with real impact over intents that only collect information.
 

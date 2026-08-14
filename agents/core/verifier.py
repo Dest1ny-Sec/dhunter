@@ -98,6 +98,11 @@ Target: {target}
 ## Reproduction steps (what the worker claims reproduces it)
 {reproduction}
 
+## Mechanical replay (platform actually re-requested the endpoint)
+{replay_note}
+If the replay shows the endpoint is DOWN (connection failed), the finding is likely
+stale — dismiss. If it returns a status, weigh it against the claimed impact.
+
 A finding is only confirmable if it comes with reproducible steps that
 demonstrate the impact (a numbered curl + the expected result). A finding with
 no reproduction / no demonstrated impact is dismissed.
@@ -144,6 +149,32 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, ll
         log.info("verifier: run %s -> %s confirmed, %s dismissed", run.run_id, confirmed, dismissed)
 
 
+async def _replay(v: dict[str, Any]) -> dict[str, Any]:
+    """Mechanically re-request the finding's target to verify it is still
+    reachable and returns a plausible status. This grounds the LLM judgment
+    in reality instead of trusting the worker's text alone."""
+    import re as _re
+    import httpx as _httpx
+    url = (v.get("target") or "").strip()
+    method = "GET"
+    # try to extract method + URL from a curl line in the reproduction
+    repro = (v.get("reproduction") or "") + "\n" + (v.get("evidence") or "")
+    for m in _re.finditer(r"curl(?: -X)?\s+(?:\S+\s+)*(?:'(https?://[^' ]+)'|\"(https?://[^\" ]+)\")", repro):
+        url = m.group(1) or m.group(2)
+        break
+    m = _re.search(r"curl(?: -X)?\s+([A-Z]+)\s", repro)
+    if m and m.group(1) in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+        method = m.group(1)
+    if not url.startswith("http"):
+        return {"ok": False, "error": "no url to replay"}
+    try:
+        async with _httpx.AsyncClient(timeout=10.0, trust_env=False, follow_redirects=True) as client:
+            resp = await client.request(method, url)
+        return {"ok": True, "status": resp.status_code, "url": url, "method": method}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_config: dict[str, Any] | None = None) -> tuple[bool, str, str]:
     """Returns (confirmed, reason, llm_severity)."""
     title = (v.get("title") or "")
@@ -156,12 +187,20 @@ async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_confi
     if is_noise and not has_exploit:
         return False, "config noise / phenomenon, no demonstrated exploit", "low"
 
+    # Mechanical replay: re-request the endpoint to ground the judgment.
+    replay = await _replay(v)
+    replay_note = ""
+    if replay.get("ok"):
+        replay_note = f"机械重放: {replay.get('method')} {replay.get('url')} -> HTTP {replay.get('status')}"
+    else:
+        replay_note = f"机械重放失败: {replay.get('error', '')}"
     user_content = VERIFY_PROMPT.format(
         title=title[:300],
         severity=(v.get("severity") or "info"),
         target=(v.get("target") or ""),
         evidence=evidence[:4000],
         reproduction=(v.get("reproduction") or "")[:3000],
+        replay_note=replay_note,
     )
     try:
         text = await call_llm_text(run, system=system_prompt, user_content=user_content, llm_config=llm_config)

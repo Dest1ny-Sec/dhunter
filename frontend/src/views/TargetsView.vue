@@ -21,13 +21,12 @@ const targetsLoading = ref(false)
 const showForm = ref(false)
 const objective = ref<string>('寻找 SQL 注入、XSS、鉴权绕过、IDOR 以及任何真实可复现的漏洞，使用 write_finding 工具上报，每条都给出 curl 复现命令。')
 
-// auth section
+// auth section — up to two accounts for A/B IDOR testing
+const authA = ref({ username: '', password: '', login_url: '', cookie: '' })
+const authB = ref({ username: '', password: '', login_url: '', cookie: '' })
 const authCookies = ref('')
 const authHeaders = ref('')
 const authNote = ref('')
-const authUser = ref('')
-const authPass = ref('')
-const authLoginUrl = ref('')
 // custom guardrails the AI must always follow
 const redLines = ref('')
 
@@ -94,11 +93,13 @@ async function start() {
 
     const cookies = authCookies.value.trim()
     const hasHeaders = authHeaders.value.trim().length > 0
-    const hasLogin = authUser.value.trim() && authPass.value
-    if (cookies || hasHeaders || hasLogin) {
+    const accA = { ...authA.value, username: authA.value.username.trim() }
+    const accB = { ...authB.value, username: authB.value.username.trim() }
+    const hasAny = cookies || hasHeaders || accA.username || accB.username
+    if (hasAny) {
       await api.patch(`/targets/${targetId}/auth`, {
         cookies, headers: parseHeaders(authHeaders.value), note: authNote.value.trim(),
-        username: authUser.value.trim(), password: authPass.value, login_url: authLoginUrl.value.trim(),
+        account_a: accA, account_b: accB,
       })
     }
     const reds = redLines.value.trim()
@@ -125,9 +126,8 @@ function resetForm() {
   authCookies.value = ''
   authHeaders.value = ''
   authNote.value = ''
-  authUser.value = ''
-  authPass.value = ''
-  authLoginUrl.value = ''
+  authA.value = { username: '', password: '', login_url: '', cookie: '' }
+  authB.value = { username: '', password: '', login_url: '', cookie: '' }
   redLines.value = ''
   showForm.value = false
   error.value = null
@@ -213,17 +213,19 @@ onMounted(() => {
             <label class="field-label">Cookie（粘贴 Cookie 头，例如 <code>sessionid=abc; uid=1</code>）</label>
             <textarea v-model="authCookies" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="sessionid=...; " />
           </div>
-          <div>
-            <label class="field-label">账号（用于自主登录测试鉴权后接口）</label>
-            <input v-model="authUser" style="width: 100%" placeholder="例如 test@example.com" />
+          <div class="acct-group">
+            <div class="acct-title">账号 A（IDOR 测试主力账号）</div>
+            <input v-model="authA.username" style="width: 100%" placeholder="账号 A 用户名/邮箱" />
+            <input v-model="authA.password" type="password" style="width: 100%" placeholder="账号 A 密码" />
+            <input v-model="authA.login_url" style="width: 100%" placeholder="登录地址（可选）" />
+            <input v-model="authA.cookie" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="账号 A Cookie（可选，已登录则直接填）" />
           </div>
-          <div>
-            <label class="field-label">密码</label>
-            <input v-model="authPass" type="password" style="width: 100%" />
-          </div>
-          <div>
-            <label class="field-label">登录地址（可选，自动探测登录接口）</label>
-            <input v-model="authLoginUrl" style="width: 100%" placeholder="例如 https://kolors.kuaishou.com/login" />
+          <div class="acct-group">
+            <div class="acct-title">账号 B（越权目标账号，测 A 越权到 B）</div>
+            <input v-model="authB.username" style="width: 100%" placeholder="账号 B 用户名/邮箱" />
+            <input v-model="authB.password" type="password" style="width: 100%" placeholder="账号 B 密码" />
+            <input v-model="authB.login_url" style="width: 100%" placeholder="登录地址（可选）" />
+            <input v-model="authB.cookie" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="账号 B Cookie（可选）" />
           </div>
           <div>
             <label class="field-label">自定义请求头（每行 <code>Key: value</code>）</label>

@@ -32,6 +32,46 @@ def _backend_url() -> str:
 # --- Fallback tool implementations --------------------------------------
 
 
+# --- stealth: per-target request throttle + 403/429 cooldown -------------
+# Keeps the agent from tripping WAF/rate-limit and burning the account.
+_MIN_REQ_INTERVAL = float(os.environ.get("DHUNTER_REQ_INTERVAL", "0.5"))  # seconds between requests to the same host
+_COOLDOWN_SECS = float(os.environ.get("DHUNTER_REQ_COOLDOWN", "5.0"))
+_req_times: dict[str, float] = {}      # host -> last request monotonic time
+_cooldown_until: dict[str, float] = {} # host -> throttle pause until
+
+
+async def _throttle(url: str) -> None:
+    import asyncio as _asyncio
+    try:
+        from urllib.parse import urlparse as _up
+        host = _up(url).hostname or "?"
+    except Exception:  # noqa: BLE001
+        host = "?"
+    now = _asyncio.get_running_loop().time()
+    # cooldown from a recent 403/429
+    until = _cooldown_until.get(host, 0)
+    if now < until:
+        await _asyncio.sleep(until - now)
+    now = _asyncio.get_running_loop().time()
+    last = _req_times.get(host, 0)
+    wait = _MIN_REQ_INTERVAL - (now - last)
+    if wait > 0:
+        await _asyncio.sleep(wait)
+    _req_times[host] = _asyncio.get_running_loop().time()
+
+
+def _note_block(url: str, status: int) -> None:
+    if status not in (403, 429):
+        return
+    import asyncio as _asyncio
+    try:
+        from urllib.parse import urlparse as _up
+        host = _up(url).hostname or "?"
+    except Exception:  # noqa: BLE001
+        host = "?"
+    _cooldown_until[host] = _asyncio.get_running_loop().time() + _COOLDOWN_SECS
+
+
 async def _http_request(args: dict[str, Any]) -> dict[str, Any]:
     method = (args.get("method") or "GET").upper()
     url = args.get("url") or ""
@@ -51,8 +91,10 @@ async def _http_request(args: dict[str, Any]) -> dict[str, Any]:
     # (self-signed targets).
     insecure = bool(args.get("insecure", False))
     try:
+        await _throttle(url)
         async with httpx.AsyncClient(trust_env=False, timeout=timeout_s, follow_redirects=True, verify=not insecure) as client:
             resp = await client.request(method, url, headers=headers, content=body)
+        _note_block(url, resp.status_code)
         text = resp.text
         truncated = False
         if len(text) > 16_000:
@@ -233,6 +275,22 @@ _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "switch_account",
+        "description": (
+            "Switch which logged-in session subsequent http_request calls use "
+            "(account a or b). Core of two-account IDOR testing: keep account A's "
+            "session, switch to it, then request account B's resource id to check "
+            "for cross-account access."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account": {"type": "string", "description": "a or b. Default b."},
+                "run_id": {"type": "string", "description": "Optional run id. Auto-set by the agent."},
+            },
+        },
+    },
+    {
         "name": "write_finding",
         "description": (
             "Record a confirmed vulnerability to the Dhunter backend. Call ONLY after "
@@ -323,10 +381,15 @@ class ToolRegistry:
 
         out = dict(args)
         headers = dict(out.get("headers") or {})
-        cookies = auth.get("cookies")
+        # use the ACTIVE account's session (A/B IDOR testing)
+        accounts = auth.get("accounts") or {}
+        active = auth.get("active") or "a"
+        acct = accounts.get(active) or {}
+        cookies = acct.get("cookies") or auth.get("cookies")  # legacy fallback
+        hdrs = acct.get("headers") or auth.get("headers") or {}
         if cookies and "Cookie" not in headers:
             headers["Cookie"] = cookies
-        for k, v in (auth.get("headers") or {}).items():
+        for k, v in (hdrs or {}).items():
             headers.setdefault(k, v)
         if headers:
             out["headers"] = headers
@@ -390,9 +453,22 @@ class ToolRegistry:
             if not current_run_id:
                 return {"content": "session_set: no run_id available", "is_error": True}
             auth = dict(self._run_auths.get(current_run_id) or {})
-            auth["cookies"] = cookie
+            acct_name = str(args.get("account") or auth.get("active") or "a")
+            accounts = dict(auth.get("accounts") or {})
+            acct = dict(accounts.get(acct_name) or {})
+            acct["cookies"] = cookie
+            accounts[acct_name] = acct
+            auth["accounts"] = accounts
             self.set_run_auth(current_run_id, auth)
-            return {"content": "session_set: 已保存登录会话，后续请求自动携带该 Cookie", "is_error": False}
+            return {"content": f"session_set: 已为账号 {acct_name} 保存会话，后续请求自动携带", "is_error": False}
+        if name == "switch_account":
+            acct_name = str(args.get("account") or "b").lower()
+            if not current_run_id:
+                return {"content": "switch_account: no run_id available", "is_error": True}
+            auth = dict(self._run_auths.get(current_run_id) or {})
+            auth["active"] = acct_name
+            self.set_run_auth(current_run_id, auth)
+            return {"content": f"switch_account: 当前会话已切换为账号 {acct_name}，后续 http_request 使用该账号", "is_error": False}
         if name in _FALLBACK_HANDLERS:
             handler = _FALLBACK_HANDLERS[name]
             # write_finding / write_fact need the current run_id.

@@ -40,12 +40,23 @@ def render_auth_note(auth: dict[str, Any] | None) -> str:
     username = (auth.get("username") or "")
     password = (auth.get("password") or "")
     login_url = (auth.get("login_url") or "")
+    accounts = auth.get("accounts") or {}
     lines = ["目标配置了登录会话。http_request 会自动为匹配该目标的请求附加已存 Cookie。"]
     if cookies:
         lines.append(f"- 已有 Cookie: {cookies[:200]}{'…' if len(cookies) > 200 else ''}")
     for k, v in (headers or {}).items():
         lines.append(f"- 请求头 {k}: {str(v)[:120]}")
-    if username and password:
+    if len(accounts) >= 2:
+        for name, acct in accounts.items():
+            if acct.get("username"):
+                lines.append(f"- 账号 {name}: {acct['username']} / 密码已提供")
+                if acct.get("login_url"):
+                    lines.append(f"  登录地址: {acct['login_url']}")
+        lines.append("- 两个账号用于 IDOR/越权测试：先用账号 a 登录拿会话（session_set 保存），"
+                     "再用 switch_account(account='b') 切到账号 b 的会话，然后访问账号 a 的资源 id——"
+                     "如果 b 能读到 a 的数据就是越权。核心手法：A 的会话访问 B 的资源。")
+        lines.append("- 未登录就先用任一账号登录（http_request 提交账密 → 拿 Set-Cookie → session_set）。")
+    elif username and password:
         lines.append(f"- 账号: {username} / 密码已提供")
         if login_url:
             lines.append(f"- 登录地址: {login_url}")

@@ -314,10 +314,20 @@ class RunManager:
             if host.startswith(("http://", "https://")):
                 from urllib.parse import urlparse
                 host = urlparse(host).hostname or host
-            self.run_auth = {**parsed, "host": host}
+            # Normalize auth into {host, active, accounts:{a,b}} for A/B IDOR.
+            accounts = {}
+            if parsed.get("account_a"):
+                accounts["a"] = {k: parsed["account_a"].get(k) for k in ("username", "password", "login_url", "cookies", "headers", "note")}
+            if parsed.get("account_b"):
+                accounts["b"] = {k: parsed["account_b"].get(k) for k in ("username", "password", "login_url", "cookies", "headers", "note")}
+            if not accounts:
+                # legacy single-account: cookies/headers at top level -> account a
+                accounts["a"] = {"cookies": parsed.get("cookies"), "headers": parsed.get("headers"), "note": parsed.get("note")}
+            self.run_auth = {"host": host, "active": "a", "accounts": accounts}
             self.registry.set_run_auth(self.run.run_id, self.run_auth)
-            if parsed.get("cookies") or parsed.get("headers"):
-                log.info("run %s: authenticated session loaded for %s", self.run.run_id, host)
+            n = sum(1 for a in accounts.values() if (a.get("cookies") or (a.get("username") and a.get("password"))))
+            if n:
+                log.info("run %s: %d account session(s) loaded for %s", self.run.run_id, n, host)
 
             # Custom guardrails: inject the target's red lines into the system
             # prompt so EVERY reason/explore turn follows them.

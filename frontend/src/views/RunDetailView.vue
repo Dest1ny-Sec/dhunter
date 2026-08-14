@@ -15,11 +15,12 @@ import { api } from '../api/client'
 const route = useRoute()
 const runId = computed(() => route.params.id as string)
 
-const tab = ref<'board' | 'stream' | 'report'>('board')
+const tab = ref<'results' | 'board' | 'stream' | 'report'>('results')
 const events = ref<SSEEvent[]>([])
 const runInfo = ref<any>(null)
 const vulns = ref<any[]>([])
 const report = ref<string>('')
+const expandedResults = ref<Record<string, boolean>>({})
 const status = ref<string>('pending')
 const error = ref<string | null>(null)
 const sseRef = ref<EventSource | null>(null)
@@ -150,9 +151,42 @@ watch(runId, async (v) => {
     <div v-if="error" style="color: var(--danger)">{{ error }}</div>
 
     <div class="tabs">
+      <button :class="['tab', { active: tab === 'results' }]" @click="tab = 'results'">成果</button>
       <button :class="['tab', { active: tab === 'board' }]" @click="tab = 'board'">攻击图</button>
       <button :class="['tab', { active: tab === 'stream' }]" @click="tab = 'stream'">实时事件</button>
       <button :class="['tab', { active: tab === 'report' }]" @click="tab = 'report'">报告</button>
+    </div>
+
+    <div v-if="tab === 'results'" class="col">
+      <div class="row">
+        <h3 style="font-size: 15px; font-weight: 600">漏洞成果（{{ vulns.length }}）</h3>
+        <span class="spacer" />
+        <span class="muted" style="font-size: 12px">confirmed {{ vulns.filter(v => v.status === 'confirmed').length }} · dismissed {{ vulns.filter(v => v.status === 'dismissed').length }}</span>
+      </div>
+      <div v-if="vulns.length" class="card" style="padding: 0">
+        <table>
+          <thead><tr><th>严重度</th><th>漏洞</th><th>状态</th><th></th></tr></thead>
+          <tbody>
+            <template v-for="v in vulns" :key="v.id">
+              <tr>
+                <td><SeverityBadge :severity="v.severity || 'info'" /></td>
+                <td>{{ v.title || v.name || v.id }}</td>
+                <td><UiBadge kind="status" :value="v.status || 'open'" /></td>
+                <td><button style="min-height: 26px; padding: 0 8px; font-size: 11px" @click="expandedResults[v.id] = !expandedResults[v.id]">{{ expandedResults[v.id] ? '收起' : '详情' }}</button></td>
+              </tr>
+              <tr v-if="expandedResults[v.id]">
+                <td colspan="4" style="background: var(--bg-elev-2); padding: 12px">
+                  <div class="muted" style="font-size: 12px; margin-bottom: 6px"><code>{{ v.target || '—' }}</code></div>
+                  <template v-if="v.reproduction"><div class="muted" style="font-size: 11px; margin-bottom: 4px">复现步骤</div><pre style="max-height: 220px; overflow:auto; margin-bottom: 10px"><code>{{ v.reproduction }}</code></pre></template>
+                  <template v-if="v.evidence"><div class="muted" style="font-size: 11px; margin-bottom: 4px">证据</div><pre style="max-height: 220px; overflow:auto"><code>{{ typeof v.evidence === 'string' ? v.evidence : JSON.stringify(v.evidence, null, 2) }}</code></pre></template>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="muted" style="font-size: 13px" v-else>暂无漏洞成果</div>
+      <button class="tab" @click="tab = 'report'">查看完整 Markdown 报告 →</button>
     </div>
 
     <div v-if="tab === 'board'" class="card" style="flex: 1; padding: 14px">
