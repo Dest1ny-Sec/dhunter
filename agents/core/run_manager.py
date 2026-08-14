@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 MAX_WORKERS = int(os.environ.get("DHUNTER_MAX_WORKERS", "3"))
 MAX_REASON_ROUNDS = int(os.environ.get("DHUNTER_MAX_REASON_ROUNDS", "8"))
 WORKER_SLICE_SECONDS = 2.0
+# Findings wait in "pending" until the verifier re-judges them. We run the
+# verifier periodically DURING the run (not just at convergence) so confirmed
+# / dismissed results surface while the agent is still digging.
+VERIFY_INTERVAL = float(os.environ.get("DHUNTER_VERIFY_INTERVAL", "60"))
 
 
 class RunManager:
@@ -45,6 +49,7 @@ class RunManager:
         self.reason_rounds = 0
         self.started = time.monotonic()
         self.run_auth: dict[str, Any] | None = None
+        self._last_verify = time.monotonic()
 
     # --- lifecycle ------------------------------------------------------
 
@@ -127,6 +132,12 @@ class RunManager:
                 if outcome in ("noop", "complete"):
                     converged = True
                     break
+
+            # Verify pending findings periodically so confirmed results
+            # surface while the run is still digging.
+            if time.monotonic() - self._last_verify > VERIFY_INTERVAL:
+                self._last_verify = time.monotonic()
+                await run_verifier(self.run, self.board, self.system_prompt)
 
             # wait for progress (or a short tick)
             if self.workers:

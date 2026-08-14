@@ -20,10 +20,12 @@ func strMap() map[string]interface{} {
 	return map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}}
 }
 
-// toolsList returns every tool the agent can call.
+// toolsList returns every tool the agent can call (built-ins + user-added
+// toolsList returns every tool the agent can call: the built-in toolbelt
+// plus any user-defined tools loaded from the custom tools directory.
 func toolsList() []toolDef {
 	str := func(t, d string) map[string]string { return map[string]string{"type": t, "description": d} }
-	return []toolDef{
+	builtins := []toolDef{
 		{Name: "fofa_search", Description: "FOFA asset search. Needs FOFA_EMAIL/FOFA_KEY (env or args). query is FOFA syntax.",
 			InputSchema: obj(map[string]interface{}{
 				"query": str("string", "FOFA query, e.g. domain=\"example.com\" or title=\"login\""),
@@ -98,6 +100,7 @@ func toolsList() []toolDef {
 				"target": str("string", "affected URL/host"), "evidence": str("string", "PoC + proof"),
 			}, []string{"title", "run_id"})},
 	}
+	return append(builtins, customToolDefs()...)
 }
 
 func obj(props map[string]interface{}, required []string) map[string]interface{} {
@@ -156,7 +159,8 @@ func callTool(ctx context.Context, name string, args map[string]interface{}) too
 	case "write_finding":
 		return writeFinding(ctx, args)
 	}
-	return errResult("unknown tool: " + name)
+	// user-defined tools from the custom tools directory
+	return callCustomTool(ctx, name, args)
 }
 
 // --- JSON-RPC wire protocol -------------------------------------------

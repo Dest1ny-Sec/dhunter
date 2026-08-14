@@ -1,0 +1,20 @@
+- name: nmap_scan
+  description: "对目标运行 nmap TCP 扫描（-sV 版本探测，低音量）"
+  input_schema:
+    type: object
+    properties:
+      target: { type: string, description: "IP 或域名" }
+      ports:  { type: string, description: "端口，如 80,443,8080" }
+    required: [target]
+  command: "nmap -sV -Pn {target} -p {ports}"
+  timeout: 600
+
+- name: curl_header
+  description: "用 curl 快速查看 HTTP 响应头"
+  input_schema:
+    type: object
+    properties:
+      url: { type: string }
+    required: [url]
+  command: "curl -sI {url}"
+  timeout: 30
