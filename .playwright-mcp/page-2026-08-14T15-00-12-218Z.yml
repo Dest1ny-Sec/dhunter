@@ -1,0 +1,174 @@
+- generic [ref=f13e3]:
+  - complementary [ref=f13e4]:
+    - generic [ref=f13e5]: Dhunter
+    - generic [ref=f13e11]:
+      - generic [ref=f13e12] [cursor=pointer]:
+        - generic [ref=f13e13]: 工作区
+        - generic [ref=f13e14]: ▾
+      - link "⊟ 仪表盘" [ref=f13e15] [cursor=pointer]:
+        - /url: /dashboard
+        - generic [ref=f13e16]: ⊟
+        - text: 仪表盘
+      - link "◇ 授权目标" [ref=f13e17] [cursor=pointer]:
+        - /url: /targets
+        - generic [ref=f13e18]: ◇
+        - text: 授权目标
+      - link "▶ 运行记录" [ref=f13e19] [cursor=pointer]:
+        - /url: /runs
+        - generic [ref=f13e20]: ▶
+        - text: 运行记录
+      - link "⚑ 漏洞成果" [ref=f13e21] [cursor=pointer]:
+        - /url: /vulns
+        - generic [ref=f13e22]: ⚑
+        - text: 漏洞成果
+    - generic [ref=f13e23]:
+      - generic [ref=f13e24] [cursor=pointer]:
+        - generic [ref=f13e25]: 系统
+        - generic [ref=f13e26]: ▾
+      - link "⚙ 设置" [ref=f13e27] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=f13e28]: ⚙
+        - text: 设置
+  - banner [ref=f13e29]:
+    - heading "运行详情" [level=1] [ref=f13e30]
+    - generic [ref=f13e31]: 2026/8/14
+    - generic "退出登录" [ref=f13e32] [cursor=pointer]: A
+  - main [ref=f13e33]:
+    - generic [ref=f13e34]:
+      - generic [ref=f13e35]:
+        - generic [ref=f13e36]:
+          - heading [level=2] [ref=f13e37]:
+            - text: Run
+            - code [ref=f13e38]: 56bd4ba5
+          - generic [ref=f13e39]: success
+        - generic [ref=f13e41]:
+          - generic [ref=f13e43]:
+            - text: tokens
+            - generic [ref=f13e44]: 5147779 / 5147779
+          - generic [ref=f13e47]: in 583.6k · out 20.2k · cache 4.54M
+        - generic [ref=f13e48]: 0 events
+      - generic [ref=f13e49]:
+        - button "攻击图" [ref=f13e50] [cursor=pointer]
+        - button "实时事件" [ref=f13e51] [cursor=pointer]
+        - button "报告" [ref=f13e52] [cursor=pointer]
+      - generic [ref=f13e54]:
+        - generic [ref=f13e55]:
+          - generic [ref=f13e56]:
+            - strong [ref=f13e57]: 攻击链路图
+            - generic [ref=f13e58]: 14 事实 · 3 意图 · 0 提示
+          - button "适应视图" [ref=f13e59] [cursor=pointer]
+        - generic [ref=f13e61]:
+          - generic [ref=f13e63]:
+            - generic:
+              - img:
+                - group "Edge from 99d9f812-ce14-489e-ab59-5f0c7ff9f8e8 to intent:d933c70b-2ae5-4642-854b-a289b1e6446b" [ref=f13e64] [cursor=pointer]
+              - img:
+                - group "Edge from intent:d933c70b-2ae5-4642-854b-a289b1e6446b to d1e7bcd8-1384-48ad-a486-0f476fbc5e20" [ref=f13e67] [cursor=pointer]:
+                  - generic [ref=f13e68]: →
+              - img:
+                - group "Edge from 99d9f812-ce14-489e-ab59-5f0c7ff9f8e8 to intent:a11e30d0-44c7-454e-aa1f-c649e24e77d3" [ref=f13e70] [cursor=pointer]
+              - img:
+                - group "Edge from intent:a11e30d0-44c7-454e-aa1f-c649e24e77d3 to 4104ca68-82a6-4eea-87d0-1f9b47c7a1cc" [ref=f13e73] [cursor=pointer]:
+                  - generic [ref=f13e74]: →
+              - img:
+                - group "Edge from 99d9f812-ce14-489e-ab59-5f0c7ff9f8e8 to intent:7b688667-8c35-45a6-9ed6-104d297445c9" [ref=f13e76] [cursor=pointer]
+              - img:
+                - group "Edge from intent:7b688667-8c35-45a6-9ed6-104d297445c9 to dacb56a2-ae54-408e-8294-fa02e9fea263" [ref=f13e79] [cursor=pointer]:
+                  - generic [ref=f13e80]: →
+              - generic:
+                - group [ref=f13e82]:
+                  - generic [ref=f13e83] [cursor=pointer]:
+                    - generic [ref=f13e84]: 99d9f812-c
+                    - generic [ref=f13e85]: "target: https://kolors.kuaishou.com"
+                    - generic [ref=f13e86]: 目标起点
+                - group [ref=f13e87]:
+                  - generic [ref=f13e88] [cursor=pointer]:
+                    - generic [ref=f13e89]: 2c02965a-6
+                    - generic [ref=f13e90]: "objective: 授权 SRC 测试 kolors.kuaishou.com（快手 KOLORS AI 生图产品）：1) 侦察：指纹、JS 分析、API 端点枚举、登录/鉴权机"
+                    - generic [ref=f13e91]: 目标
+                - group [ref=f13e92]:
+                  - generic [ref=f13e93] [cursor=pointer]:
+                    - generic [ref=f13e94]: 956096ea-8
+                    - generic [ref=f13e95]: "Main JS bundle path: /assets/index-eace803b.js (Vue 3.4.15 app). Need to mine API endpoint"
+                    - generic [ref=f13e96]: 智能体发现
+                - group [ref=f13e97]:
+                  - generic [ref=f13e98] [cursor=pointer]:
+                    - generic [ref=f13e99]: 54246015-f
+                    - generic [ref=f13e100]: "kolors.kuaishou.com main page loads `/assets/index-eace803b.js` (Vue 3.4.15, vite, infra-c"
+                    - generic [ref=f13e101]: 智能体发现
+                - group [ref=f13e102]:
+                  - generic [ref=f13e103] [cursor=pointer]:
+                    - generic [ref=f13e104]: 78a2aa5f-2
+                    - generic [ref=f13e105]: "JS bundle contains hardcoded RSA public key (PEM, 2048-bit) used by `t.encrypt`/`encrypt`"
+                    - generic [ref=f13e106]: 智能体发现
+                - group [ref=f13e107]:
+                  - generic [ref=f13e108] [cursor=pointer]:
+                    - generic [ref=f13e109]: 373f2ea1-c
+                    - generic [ref=f13e110]: "SSO API surface discovered from JS bundle: https://id.kuaishou.com (and .cn) and https://p"
+                    - generic [ref=f13e111]: 智能体发现
+                - group [ref=f13e112]:
+                  - generic [ref=f13e113] [cursor=pointer]:
+                    - generic [ref=f13e114]: d8b78229-0
+                    - generic [ref=f13e115]: "kolors.kuaishou.com identification & auth surface: - `fXe()` env map: `kolors.kuaishou.com"
+                    - generic [ref=f13e116]: 智能体发现
+                - group [ref=f13e117]:
+                  - generic [ref=f13e118] [cursor=pointer]:
+                    - generic [ref=f13e119]: 4cce9530-a
+                    - generic [ref=f13e120]: "Full SSO login flow (production) — endpoints centered on `id.kuaishou.com` (configurable v"
+                    - generic [ref=f13e121]: 智能体发现
+                - group [ref=f13e122]:
+                  - generic [ref=f13e123] [cursor=pointer]:
+                    - generic [ref=f13e124]: d1e7bcd8-1
+                    - generic [ref=f13e125]: "Got the main page. Found the JS bundle: `/assets/index-eace803b.js`. Let me fetch it and c"
+                    - generic [ref=f13e126]: 意图结论
+                - group [ref=f13e127]:
+                  - generic [ref=f13e128] [cursor=pointer]:
+                    - generic [ref=f13e129]: 93ef19f5-0
+                    - generic [ref=f13e130]: "Kolors SPA architecture confirmed: Vue 3 + Element Plus SPA hosted on kolors.kuaishou.com:"
+                    - generic [ref=f13e131]: 智能体发现
+                - group [ref=f13e132]:
+                  - generic [ref=f13e133] [cursor=pointer]:
+                    - generic [ref=f13e134]: ec70d67d-5
+                    - generic [ref=f13e135]: JS bundle contains RSA public key (PEM-encoded MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQE
+                    - generic [ref=f13e136]: 智能体发现
+                - group [ref=f13e137]:
+                  - generic [ref=f13e138] [cursor=pointer]:
+                    - generic [ref=f13e139]: 4104ca68-8
+                    - generic [ref=f13e140]: I'll start by exploring the target's main page to understand the application surface and d
+                    - generic [ref=f13e141]: 意图结论
+                - group [ref=f13e142]:
+                  - generic [ref=f13e143] [cursor=pointer]:
+                    - generic [ref=f13e144]: d3e13180-f
+                    - generic [ref=f13e145]: "Complete SSO API endpoint list (production base = https://id.kuaishou.com): - POST /rest/c"
+                    - generic [ref=f13e146]: 智能体发现
+                - group [ref=f13e147]:
+                  - generic [ref=f13e148] [cursor=pointer]:
+                    - generic [ref=f13e149]: dacb56a2-a
+                    - generic [ref=f13e150]: I'll start by analyzing the JS bundle to understand the login/auth endpoints and the encry
+                    - generic [ref=f13e151]: 意图结论
+                - group [ref=f13e152]:
+                  - generic [ref=f13e153] [cursor=pointer]:
+                    - generic [ref=f13e154]: 已完成
+                    - generic [ref=f13e155]: Fetch kolors.kuaishou.com main page and all referenced JS bundles; extract API endpoints,
+                    - generic [ref=f13e156]: worker w1
+                - group [ref=f13e157]:
+                  - generic [ref=f13e158] [cursor=pointer]:
+                    - generic [ref=f13e159]: 已完成
+                    - generic [ref=f13e160]: Enumerate candidate API endpoints discovered in JS (auth, image generation, user/works, sh
+                    - generic [ref=f13e161]: worker w2
+                - group [ref=f13e162]:
+                  - generic [ref=f13e163] [cursor=pointer]:
+                    - generic [ref=f13e164]: 已完成
+                    - generic [ref=f13e165]: Test login/auth endpoints discovered in JS for SQLi/credential-stuffing-style injection in
+                    - generic [ref=f13e166]: worker w2
+          - generic [ref=f13e169]:
+            - button [ref=f13e170] [cursor=pointer]
+            - button [ref=f13e173] [cursor=pointer]
+            - button [ref=f13e176] [cursor=pointer]
+            - button [ref=f13e179] [cursor=pointer]
+          - img "Vue Flow mini map" [ref=f13e183]
+        - generic [ref=f13e203]:
+          - generic [ref=f13e204]: 提示（注入给 AI 下一轮读取的指引）
+          - generic [ref=f13e205]:
+            - textbox "e.g. try /actuator/env, use admin/admin creds…" [ref=f13e206]
+            - button "Send" [ref=f13e207] [cursor=pointer]

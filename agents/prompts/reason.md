@@ -50,6 +50,7 @@ phenomenon (a CORS header, a missing HSTS, a version number, an endpoint that ex
 
 # Output
 Return ONLY one raw JSON object and nothing else. No markdown fences, no prose.
+Every `description` must be written in Chinese (technical terms may stay as abbreviations).
 
 1. Propose intents:
 ```json

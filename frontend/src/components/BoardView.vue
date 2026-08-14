@@ -26,6 +26,7 @@ async function load() {
     intents.value = res.data?.intents || []
     hints.value = res.data?.hints || []
     loading.value = false
+    syncGraph()
   } catch {
     loading.value = true
   }
@@ -97,7 +98,12 @@ interface VEdge { id: string; source: string; target: string; label?: string; an
 
 const { fitView } = useVueFlow()
 
-const nodes = computed<VNode[]>(() => {
+// Mutable flow state so Vue Flow keeps the user's drag positions; we only
+// layout NEW nodes on poll and never reset existing ones.
+const flowNodes = ref<any[]>([])
+const flowEdges = ref<any[]>([])
+
+function buildDesiredNodes(): VNode[] {
   const factNodes: VNode[] = facts.value.map((f) => ({
     id: f.id,
     type: 'fact',
@@ -110,49 +116,70 @@ const nodes = computed<VNode[]>(() => {
     position: { x: 0, y: 0 },
     data: { description: it.description, status: it.status, worker: it.worker },
   }))
-  return layout(factNodes, intentNodes)
-})
+  return [...factNodes, ...intentNodes]
+}
 
-const edges = computed<VEdge[]>(() => {
+function buildDesiredEdges(): VEdge[] {
   const out: VEdge[] = []
   for (const it of intents.value) {
     const intentNodeId = `intent:${it.id}`
     const from = (it.from || []).filter((id: string) => facts.value.some((f) => f.id === id))
     const sources = from.length ? from : facts.value.filter((f) => f.source === 'origin').map((f) => f.id)
-    for (const s of sources) {
+    for (const src of sources) {
       out.push({
-        id: `e-${it.id}-${s}`,
-        source: s,
+        id: `e-${it.id}-${src}`,
+        source: src,
         target: intentNodeId,
         animated: it.status === 'claimed',
         style: it.status === 'failed' ? { stroke: 'var(--text-faint)', strokeDasharray: '4 3' } : undefined,
       })
     }
     if (it.to_fact_id) {
-      out.push({
-        id: `e2-${it.id}`,
-        source: intentNodeId,
-        target: it.to_fact_id,
-        label: '→',
-      })
+      out.push({ id: `e2-${it.id}`, source: intentNodeId, target: it.to_fact_id, label: '→' })
     }
   }
   return out
-})
+}
 
-function layout(factNodes: VNode[], intentNodes: VNode[]): VNode[] {
-  const all = [...factNodes, ...intentNodes]
-  if (all.length === 0) return []
+function layoutPositions(nodes: VNode[], edges: VEdge[]): Map<string, { x: number; y: number }> {
   const g = new dagre.graphlib.Graph()
   g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 70, marginx: 20, marginy: 20 })
   g.setDefaultEdgeLabel(() => ({}))
-  for (const n of all) g.setNode(n.id, { width: 210, height: n.type === 'intent' ? 88 : 78 })
-  for (const e of edges.value) g.setEdge(e.source, e.target)
+  for (const n of nodes) g.setNode(n.id, { width: 210, height: n.type === 'intent' ? 88 : 78 })
+  for (const e of edges) g.setEdge(e.source, e.target)
   dagre.layout(g)
-  return all.map((n) => {
+  const map = new Map<string, { x: number; y: number }>()
+  for (const n of nodes) {
     const pos = g.node(n.id)
-    return { ...n, position: { x: pos.x - 105, y: pos.y - (n.type === 'intent' ? 44 : 39) } }
-  })
+    if (pos) map.set(n.id, { x: pos.x - 105, y: pos.y - (n.type === 'intent' ? 44 : 39) })
+  }
+  return map
+}
+
+function syncGraph() {
+  const desiredNodes = buildDesiredNodes()
+  const desiredEdges = buildDesiredEdges()
+  const byId = new Map(flowNodes.value.map((n) => [n.id, n]))
+  const fresh: VNode[] = []
+  for (const dn of desiredNodes) {
+    const existing = byId.get(dn.id)
+    if (existing) {
+      // refresh data, keep the user's position
+      existing.data = { ...existing.data, ...dn.data }
+    } else {
+      fresh.push(dn)
+    }
+  }
+  if (fresh.length) {
+    const positions = layoutPositions(desiredNodes, desiredEdges)
+    for (const n of fresh) {
+      const p = positions.get(n.id)
+      if (p) n.position = p
+    }
+    flowNodes.value.push(...fresh)
+  }
+  // edges carry no user position; replace wholesale
+  flowEdges.value = desiredEdges
 }
 
 function onNodeClick({ node }: any) {
@@ -175,17 +202,20 @@ const statusLabel: Record<string, string> = { open: '待执行', claimed: '进�
         <strong>攻击链路图</strong>
         <span class="muted" style="font-size: 11px">{{ facts.length }} 事实 · {{ intents.length }} 意图 · {{ hints.length }} 提示</span>
       </div>
-      <button v-if="nodes.length" class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="() => fitView()">适应视图</button>
+      <button v-if="flowNodes.length" class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="() => fitView()">适应视图</button>
     </div>
 
     <div class="graph-wrap">
       <VueFlow
-        v-if="nodes.length"
-        :nodes="nodes"
-        :edges="edges"
+        v-if="flowNodes.length"
+        v-model:nodes="flowNodes"
+        v-model:edges="flowEdges"
         :node-types="nodeTypes"
         :min-zoom="0.1"
         :max-zoom="2"
+        :nodes-draggable="true"
+        :pan-on-drag="true"
+        :zoom-on-scroll="true"
         @node-click="onNodeClick"
       >
         <Background :gap="20" pattern-color="#1a1e3a" />
@@ -218,7 +248,7 @@ const statusLabel: Record<string, string> = { open: '待执行', claimed: '进�
     <div class="hint-block">
       <div class="muted" style="font-size: 11px">提示（注入给 AI 下一轮读取的指引）</div>
       <div class="hint-input">
-        <input v-model="hintText" placeholder="e.g. try /actuator/env, use admin/admin creds…" @keyup.enter="sendHint" />
+        <input v-model="hintText" placeholder="例如：试试 /actuator/env、用 admin/admin 登录…" @keyup.enter="sendHint" />
         <button class="primary" style="min-height: 34px" @click="sendHint">Send</button>
         <span v-if="hintMsg" class="muted" style="font-size: 11px">{{ hintMsg }}</span>
       </div>

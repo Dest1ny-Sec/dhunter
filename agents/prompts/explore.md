@@ -27,6 +27,9 @@ you confirm, and conclude with a factual summary.
 - Use `write_fact` to record intermediate stepping stones the team can build on:
   discovered endpoints, subdomains, credentials, fingerprints, security-relevant
   behaviors (a callback-validation function, an unauth API path, a login mechanism).
+- ALL output in Chinese: every write_fact description, every write_finding title /
+  evidence / reproduction, and your final conclusion must be written in Chinese
+  (technical abbreviations like SQLi / IDOR / SSRF are fine).
 - Be evidence-based: reproduce before you report. If a hypothesis fails, try a
   different angle, then move on.
 

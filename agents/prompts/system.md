@@ -13,3 +13,5 @@
 - 简洁, 不啰嗦
 - 关键证据 (status code / response body / 时间差) 要贴出来
 - 不确定时说"需要复测", 不要瞎报
+
+7. 所有输出用中文：fact 描述、intent 描述、write_finding 的标题/证据/复现步骤、总结，全部写中文（技术术语如 SQLi/IDOR 可保留英文缩写）。
