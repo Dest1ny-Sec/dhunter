@@ -177,7 +177,17 @@ class RunManager:
             raise RuntimeError(f"overall timeout ({int(OVERALL_TIMEOUT)}s) exceeded")
 
         # Quality gate: independently re-judge every pending finding.
+        # Run a second pass if a worker landed a finding in the last instant
+        # (a race that otherwise leaves a fresh finding stuck in "pending").
         await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
+        for _ in range(2):
+            try:
+                still = [v for v in await self.board.list_vulnerabilities(self.run.run_id) if v.get("status") in ("pending", "open")]
+            except Exception:  # noqa: BLE001
+                break
+            if not still:
+                break
+            await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
 
         # Learn reusable intel for future runs on this host family.
         try:
