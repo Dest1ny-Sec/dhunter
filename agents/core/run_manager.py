@@ -32,6 +32,11 @@ log = logging.getLogger(__name__)
 MAX_WORKERS = int(os.environ.get("DHUNTER_MAX_WORKERS", "3"))
 MAX_REASON_ROUNDS = int(os.environ.get("DHUNTER_MAX_REASON_ROUNDS", "8"))
 WORKER_SLICE_SECONDS = 2.0
+# A reason "noop" is only trustworthy after real exploration happened. If the
+# board is still basically empty (no facts beyond origin/goal), a noop is
+# almost certainly the LLM misjudging an empty board — we force a bootstrap
+# recon intent instead of converging an empty run.
+MIN_EXPLORED_FACTS = 3
 # Findings wait in "pending" until the verifier re-judges them. We run the
 # verifier periodically DURING the run (not just at convergence) so confirmed
 # / dismissed results surface while the agent is still digging.
@@ -217,8 +222,28 @@ class RunManager:
             if payload:
                 self.run.summary = str(payload)
             return "complete"
-        log.info("run %s: reason noop — converging", self.run.run_id)
+        # noop — but guard against premature convergence on an empty board.
+        explored = [f for f in (graph.get("facts") or []) if f.get("source") not in ("origin", "goal")]
+        attempted = [i for i in (graph.get("intents") or []) if i.get("status") in ("concluded", "failed")]
+        if not explored and not attempted:
+            # Nothing has been explored at all — this noop is the LLM
+            # misjudging an empty board. Force a bootstrap recon intent.
+            log.warning("run %s: reason noop on empty board — forcing bootstrap recon", self.run.run_id)
+            await self._inject_bootstrap_recon()
+            return "intents"
+        log.info("run %s: reason noop after %s fact(s) / %s intent(s) attempted — converging", self.run.run_id, len(explored), len(attempted))
         return "noop"
+
+    async def _inject_bootstrap_recon(self) -> None:
+        """Force an initial reconnaissance intent so a fresh run never
+        converges empty (LLMs sometimes noop on an empty board)."""
+        target = self.run.target
+        descs = [
+            f"Initial reconnaissance: enumerate the attack surface of {target} "
+            "(subdomains / endpoints / JS assets / technologies), then record what is live.",
+        ]
+        for desc in descs:
+            await self.board.create_intent(self.run.run_id, [], desc, creator="bootstrap")
 
     async def _build_summary(self) -> str:
         # A reason "complete" already set a meaningful summary — keep it.

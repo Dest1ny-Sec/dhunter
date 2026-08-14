@@ -98,6 +98,28 @@ def test_reason_complete_converges():
     assert board.intents == []
 
 
+def test_noop_on_empty_board_forces_bootstrap_recon():
+    """An LLM nooping on an empty board must NOT converge the run empty —
+    the engine injects a bootstrap recon intent instead."""
+    _patch_llm(reason_response='{"kind": "noop"}', explore_response="Found the login page and an API endpoint.")
+
+    async def scenario():
+        run = _make_run(run_id="test-bootstrap")
+        board = FakeBoard()
+        mgr = RunManager(run, board, ToolRegistry(), system_prompt="sys")
+        await mgr.execute()
+        return run, board
+
+    run, board = asyncio.run(scenario())
+    assert run.status == "success", run.status
+    # bootstrap intent was created and explored -> at least one concluded intent
+    concluded = [i for i in board.intents if i["status"] == "concluded"]
+    assert len(concluded) >= 1, f"bootstrap recon should have run, intents={board.intents}"
+    # and at least one real fact beyond origin/goal was recorded
+    real_facts = [f for f in board.facts if f["source"] not in ("origin", "goal")]
+    assert len(real_facts) >= 1, board.facts
+
+
 def test_cancel_run_sets_cancelled_status():
     """Cancelling the manager task must cancel workers and end the run
     with status=cancelled (and a run_done event)."""
