@@ -154,6 +154,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"vulnerabilities", "norm_title TEXT NOT NULL DEFAULT ''"},
 		{"vulnerabilities", "reproduction TEXT NOT NULL DEFAULT ''"},
 		{"targets", "auth_context TEXT NOT NULL DEFAULT ''"},
+		{"targets", "red_lines TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !d.columnExists(ctx, col.table, strings.TrimSpace(strings.SplitN(col.def, " ", 2)[0])) {
 			if _, err := d.ExecContext(ctx, "ALTER TABLE "+col.table+" ADD COLUMN "+col.def); err != nil {

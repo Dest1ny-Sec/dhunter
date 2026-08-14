@@ -204,6 +204,13 @@ class RunManager:
             self.registry.set_run_auth(self.run.run_id, self.run_auth)
             if parsed.get("cookies") or parsed.get("headers"):
                 log.info("run %s: authenticated session loaded for %s", self.run.run_id, host)
+
+            # Custom guardrails: inject the target's red lines into the system
+            # prompt so EVERY reason/explore turn follows them.
+            red_lines = (target.get("red_lines") or "").strip()
+            if red_lines:
+                self.system_prompt = self.system_prompt + "\n\n# Red lines (MUST always follow)\n" + red_lines
+                log.info("run %s: %d red line(s) injected", self.run.run_id, len(red_lines.splitlines()))
         except Exception as e:  # noqa: BLE001
             log.warning("run %s: failed to load auth context: %s", self.run.run_id, e)
 

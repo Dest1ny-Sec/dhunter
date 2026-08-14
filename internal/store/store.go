@@ -34,7 +34,10 @@ type Target struct {
 	// agent auto-injects when testing this target — e.g. a white-hat's
 	// logged-in session so the agent can test behind-auth function points.
 	AuthContext string    `json:"auth_context"`
-	CreatedAt   time.Time `json:"created_at"`
+	// RedLines are custom user rules/guardrails the agent MUST always follow
+	// (e.g. "禁止爆破", "只在授权范围", "不测支付接口"). Newline-separated.
+	RedLines  string    `json:"red_lines,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Run is a single agent execution.
@@ -164,9 +167,9 @@ func (s *TargetStore) Create(ctx context.Context, t *Target) error {
 		t.Attributes = json.RawMessage(`{}`)
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.CreatedAt.UnixMilli())
+		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, red_lines, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.RedLines, t.CreatedAt.UnixMilli())
 	return err
 }
 
@@ -183,10 +186,22 @@ func (s *TargetStore) SetAuth(ctx context.Context, id, auth string) error {
 	return nil
 }
 
+// SetRedLines stores (or clears) the custom guardrails for a target.
+func (s *TargetStore) SetRedLines(ctx context.Context, id, redLines string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE targets SET red_lines = ? WHERE id = ?`, redLines, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Get fetches a target by ID.
 func (s *TargetStore) Get(ctx context.Context, id string) (*Target, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, created_at FROM targets WHERE id = ?`, id)
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, created_at FROM targets WHERE id = ?`, id)
 	return scanTarget(row)
 }
 
@@ -196,7 +211,7 @@ func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, created_at FROM targets
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, created_at FROM targets
 		 ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -221,7 +236,7 @@ func scanTarget(r rowScanner) (*Target, error) {
 	var t Target
 	var attrs string
 	var createdMs int64
-	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &createdMs); err != nil {
+	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

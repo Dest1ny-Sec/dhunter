@@ -23,6 +23,8 @@ const objective = ref<string>('寻找 SQL 注入、XSS、鉴权绕过、IDOR 以
 const authCookies = ref('')
 const authHeaders = ref('')
 const authNote = ref('')
+// custom guardrails the AI must always follow
+const redLines = ref('')
 
 const placeholders: Record<string, string> = {
   auto: '例如 acme.com、https://acme.com、10.0.0.1，或"某科技公司"',
@@ -89,6 +91,10 @@ async function start() {
         cookies, headers: parseHeaders(authHeaders.value), note: authNote.value.trim(),
       })
     }
+    const reds = redLines.value.trim()
+    if (reds) {
+      await api.patch(`/targets/${targetId}/redlines`, { red_lines: reds })
+    }
     const rRes = await api.post('/runs', { target_id: targetId, objective: objective.value })
     const runId = rRes.data?.id || rRes.data?.run_id
     if (!runId) throw new Error('No run id returned')
@@ -108,6 +114,7 @@ function resetForm() {
   authCookies.value = ''
   authHeaders.value = ''
   authNote.value = ''
+  redLines.value = ''
   showForm.value = false
   error.value = null
 }
@@ -184,6 +191,11 @@ onMounted(loadTargets)
           </div>
         </div>
       </details>
+      <div>
+        <label class="field-label">🚫 红线 / 自定义要求（AI 每一轮都必须遵守，每行一条）</label>
+        <textarea v-model="redLines" rows="2" style="width: 100%; font-size: 12.5px"
+          placeholder="例如：禁止爆破/高频请求&#10;只在授权范围测试&#10;不测试支付/资金相关接口&#10;发现任何涉及用户数据的问题立即停止并上报" />
+      </div>
       <div v-if="error" style="color: var(--danger); font-size: 13px">{{ error }}</div>
       <div class="row">
         <UiButton variant="primary" size="lg" :disabled="loading" @click="start">

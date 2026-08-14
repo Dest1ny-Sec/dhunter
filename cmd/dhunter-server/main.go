@@ -104,6 +104,7 @@ func main() {
 		api.GET("/targets", targetH.List)
 		api.GET("/targets/:id", targetH.Get)
 		api.PATCH("/targets/:id/auth", targetH.SetAuth)
+		api.PATCH("/targets/:id/redlines", targetH.SetRedLines)
 
 		runH := handler.NewRunHandler(stores, bridge, hub)
 		api.POST("/runs", runH.Create)

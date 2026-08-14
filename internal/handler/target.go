@@ -42,8 +42,9 @@ var targetTypes = map[string]struct{}{
 
 // createTargetReq is the JSON body for POST /api/targets.
 type createTargetReq struct {
-	Input string `json:"input"`
-	Type  string `json:"type"`
+	Input    string `json:"input"`
+	Type     string `json:"type"`
+	RedLines string `json:"red_lines"`
 }
 
 // Create handles POST /api/targets.
@@ -89,6 +90,7 @@ func (h *TargetHandler) Create(c *gin.Context) {
 		Value:      req.Input,
 		Normalized: normalized,
 		Attributes: attrJSON,
+		RedLines:   strings.TrimSpace(req.RedLines),
 		CreatedAt:  time.Now().UTC(),
 	}
 	if err := h.Stores.Targets.Create(c.Request.Context(), t); err != nil {
@@ -145,6 +147,27 @@ func (h *TargetHandler) SetAuth(c *gin.Context) {
 		return
 	}
 	if err := h.Stores.Targets.SetAuth(c.Request.Context(), id, string(authJSON)); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
+}
+
+// SetRedLines handles PATCH /api/targets/:id/redlines.
+func (h *TargetHandler) SetRedLines(c *gin.Context) {
+	id := c.Param("id")
+	var body struct {
+		RedLines string `json:"red_lines"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	if err := h.Stores.Targets.SetRedLines(c.Request.Context(), id, body.RedLines); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
 			return
