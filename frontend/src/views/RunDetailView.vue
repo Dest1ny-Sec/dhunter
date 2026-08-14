@@ -151,7 +151,18 @@ onBeforeUnmount(() => {
 })
 onBeforeUnmount(() => { if (sseRef.value) { sseRef.value.close(); sseRef.value = null } })
 watch(runId, async (v) => {
-  if (v) { events.value = []; vulns.value = []; report.value = ''; await loadRun(); connectSSE() }
+  if (v) {
+    // reset per-run state, always land on the findings-first 成果 tab
+    tab.value = 'results'
+    expandedResults.value = {}
+    events.value = []
+    vulns.value = []
+    report.value = ''
+    toolActivity.value = []
+    await loadRun()
+    connectSSE()
+    loadTools()
+  }
 })
 </script>
 
