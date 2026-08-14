@@ -15,8 +15,17 @@ import { api } from '../api/client'
 const route = useRoute()
 const runId = computed(() => route.params.id as string)
 
-const tab = ref<'results' | 'board' | 'stream' | 'report'>('results')
+const tab = ref<'results' | 'tools' | 'board' | 'stream' | 'report'>('results')
 const events = ref<SSEEvent[]>([])
+const toolActivity = ref<any[]>([])
+let toolTimer: number | null = null
+
+async function loadTools() {
+  try {
+    const res = await api.get(`/runs/${runId.value}/tool_calls`)
+    toolActivity.value = Array.isArray(res.data) ? res.data : res.data?.tool_calls || []
+  } catch {}
+}
 const runInfo = ref<any>(null)
 const vulns = ref<any[]>([])
 const report = ref<string>('')
@@ -69,6 +78,12 @@ function fmtN(n?: number): string {
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(2)}M`
 }
+function toolArgUrl(t: any): string {
+  const a = t.arguments
+  if (a && typeof a === 'object') return a.url || a.domain || a.target || ''
+  return ''
+}
+
 function fmtTime(s?: string) {
   if (!s) return '—'
   try { return new Date(s).toLocaleString() } catch { return s }
@@ -125,7 +140,15 @@ function connectSSE() {
   }
 }
 
-onMounted(async () => { await loadRun(); connectSSE() })
+onMounted(async () => {
+  await loadRun()
+  connectSSE()
+  loadTools()
+  toolTimer = window.setInterval(loadTools, 3000)
+})
+onBeforeUnmount(() => {
+  if (toolTimer) window.clearInterval(toolTimer)
+})
 onBeforeUnmount(() => { if (sseRef.value) { sseRef.value.close(); sseRef.value = null } })
 watch(runId, async (v) => {
   if (v) { events.value = []; vulns.value = []; report.value = ''; await loadRun(); connectSSE() }
@@ -152,6 +175,7 @@ watch(runId, async (v) => {
 
     <div class="tabs">
       <button :class="['tab', { active: tab === 'results' }]" @click="tab = 'results'">成果</button>
+      <button :class="['tab', { active: tab === 'tools' }]" @click="tab = 'tools'">工具活动 ({{ toolActivity.length }})</button>
       <button :class="['tab', { active: tab === 'board' }]" @click="tab = 'board'">攻击图</button>
       <button :class="['tab', { active: tab === 'stream' }]" @click="tab = 'stream'">实时事件</button>
       <button :class="['tab', { active: tab === 'report' }]" @click="tab = 'report'">报告</button>
@@ -187,6 +211,19 @@ watch(runId, async (v) => {
       </div>
       <div class="muted" style="font-size: 13px" v-else>暂无漏洞成果</div>
       <button class="tab" @click="tab = 'report'">查看完整 Markdown 报告 →</button>
+    </div>
+
+    <div v-if="tab === 'tools'" class="card" style="padding: 0">
+      <div v-if="toolActivity.length" class="tool-log">
+        <div v-for="t in toolActivity" :key="t.id" class="tool-line">
+          <span class="tool-name"><code>{{ t.name }}</code></span>
+          <span class="tool-url muted">{{ toolArgUrl(t) }}</span>
+          <span class="spacer" />
+          <span class="tool-status" :style="{ color: t.is_error ? 'var(--danger)' : 'var(--ok)' }">{{ t.is_error ? 'error' : 'ok' }}</span>
+          <span class="muted" style="font-size: 11px">{{ t.duration_ms }}ms</span>
+        </div>
+      </div>
+      <div v-else class="muted" style="padding: 20px; text-align: center">暂无工具调用</div>
     </div>
 
     <div v-if="tab === 'board'" class="card" style="flex: 1; padding: 14px">
@@ -261,4 +298,9 @@ watch(runId, async (v) => {
 <style scoped>
 .run-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .run-tokens { display: flex; align-items: center; gap: 12px; min-width: 280px; flex: 1; }
+.tool-log { max-height: 70vh; overflow-y: auto; }
+.tool-line { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--border-soft); font-size: 12px; }
+.tool-name { min-width: 120px; }
+.tool-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-status { font-size: 11px; font-weight: 600; }
 </style>
