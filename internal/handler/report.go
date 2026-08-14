@@ -113,6 +113,9 @@ func (h *ReportHandler) buildMarkdown(c *gin.Context, runID string) (string, err
 			if v.Evidence != "" {
 				fmt.Fprintf(&b, "- **Evidence**:\n\n```\n%s\n```\n", v.Evidence)
 			}
+			if v.Reproduction != "" {
+				fmt.Fprintf(&b, "- **Reproduction (复现步骤)**:\n\n```\n%s\n```\n", v.Reproduction)
+			}
 			if v.Impact != "" {
 				fmt.Fprintf(&b, "- **Impact**: %s\n", v.Impact)
 			}

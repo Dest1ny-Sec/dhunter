@@ -81,6 +81,7 @@ async def _write_finding(args: dict[str, Any], current_run_id: str = "") -> dict
         return {"content": f"write_finding: invalid severity `{severity}`", "is_error": True}
     target = args.get("target") or ""
     evidence = args.get("evidence") or ""
+    reproduction = args.get("reproduction") or ""
     # Prefer the explicit run_id from the LLM (for batch writes that
     # reference older runs); fall back to the currently active run so
     # the common case works without ceremony.
@@ -91,6 +92,7 @@ async def _write_finding(args: dict[str, Any], current_run_id: str = "") -> dict
         "severity": severity,
         "target": target,
         "evidence": evidence,
+        "reproduction": reproduction,
         # New findings wait for the verifier before they count as confirmed.
         "status": "pending",
     }
@@ -234,9 +236,13 @@ _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "PoC + proof: request, response, payload, screenshot-equivalent text.",
                 },
+                "reproduction": {
+                    "type": "string",
+                    "description": "Step-by-step reproduction: numbered curl commands + expected result. REQUIRED for every confirmed finding.",
+                },
                 "run_id": {"type": "string", "description": "Optional run id. Auto-set by the agent."},
             },
-            "required": ["title", "severity", "target", "evidence"],
+            "required": ["title", "severity", "target", "evidence", "reproduction"],
         },
     },
 ]

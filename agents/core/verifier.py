@@ -83,6 +83,13 @@ Target: {target}
 ## Evidence (what the worker wrote)
 {evidence}
 
+## Reproduction steps (what the worker claims reproduces it)
+{reproduction}
+
+A finding is only confirmable if it comes with reproducible steps that
+demonstrate the impact (a numbered curl + the expected result). A finding with
+no reproduction / no demonstrated impact is dismissed.
+
 ## Output — ONE JSON object only
 {{"confirm": true, "reason": "<one sentence>", "severity": "<critical|high|medium|low|info>"}}
 or
@@ -142,6 +149,7 @@ async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any]) -> tuple[
         severity=(v.get("severity") or "info"),
         target=(v.get("target") or ""),
         evidence=evidence[:4000],
+        reproduction=(v.get("reproduction") or "")[:3000],
     )
     try:
         text = await call_llm_text(run, system=system_prompt, user_content=user_content)

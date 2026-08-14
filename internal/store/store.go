@@ -76,7 +76,10 @@ type Vulnerability struct {
 	Evidence       string    `json:"evidence"`
 	Impact         string    `json:"impact"`
 	Recommendation string    `json:"recommendation"`
-	CreatedAt      time.Time `json:"created_at"`
+	// Reproduction holds step-by-step repro instructions (curl + expected
+	// result) so a report is actionable without re-deriving the PoC.
+	Reproduction string    `json:"reproduction,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 	// NormTitle is a dedup key (lowercased, trimmed, whitespace-collapsed).
 	// It is computed by the store and never exposed over the API.
 	NormTitle string `json:"-"`
@@ -456,10 +459,10 @@ func (s *VulnStore) Create(ctx context.Context, v *Vulnerability) error {
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO vulnerabilities
-		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at, norm_title)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at, norm_title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, v.RunID, v.TargetID, v.Title, v.Severity, v.Status, v.Target,
-		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli(), v.NormTitle)
+		v.Evidence, v.Impact, v.Recommendation, v.Reproduction, v.CreatedAt.UnixMilli(), v.NormTitle)
 	return err
 }
 
@@ -548,10 +551,10 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO vulnerabilities
-		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at, norm_title)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at, norm_title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, v.RunID, v.TargetID, v.Title, v.Severity, v.Status, v.Target,
-		v.Evidence, v.Impact, v.Recommendation, v.CreatedAt.UnixMilli(), v.NormTitle)
+		v.Evidence, v.Impact, v.Recommendation, v.Reproduction, v.CreatedAt.UnixMilli(), v.NormTitle)
 	if err != nil {
 		return false, "", err
 	}
@@ -567,7 +570,7 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 // Get fetches a vulnerability by ID.
 func (s *VulnStore) Get(ctx context.Context, id string) (*Vulnerability, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at
+		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at
 		 FROM vulnerabilities WHERE id = ?`, id)
 	return scanVuln(row)
 }
@@ -575,13 +578,13 @@ func (s *VulnStore) Get(ctx context.Context, id string) (*Vulnerability, error) 
 // ListByRun returns vulnerabilities for a run.
 func (s *VulnStore) ListByRun(ctx context.Context, runID string) ([]*Vulnerability, error) {
 	return s.query(ctx,
-		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at
+		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at
 		 FROM vulnerabilities WHERE run_id = ? ORDER BY created_at ASC`, runID)
 }
 
 // ListAll returns every vulnerability, optionally filtered.
 func (s *VulnStore) ListAll(ctx context.Context, runID, targetID, severity string) ([]*Vulnerability, error) {
-	q := `SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, created_at
+	q := `SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at
 	      FROM vulnerabilities WHERE 1=1`
 	args := []any{}
 	if runID != "" {
@@ -621,7 +624,7 @@ func scanVuln(r rowScanner) (*Vulnerability, error) {
 	var v Vulnerability
 	var createdMs int64
 	if err := r.Scan(&v.ID, &v.RunID, &v.TargetID, &v.Title, &v.Severity, &v.Status,
-		&v.Target, &v.Evidence, &v.Impact, &v.Recommendation, &createdMs); err != nil {
+		&v.Target, &v.Evidence, &v.Impact, &v.Recommendation, &v.Reproduction, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

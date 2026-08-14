@@ -17,7 +17,7 @@ const runs = ref<any[]>([])
 const vulns = ref<any[]>([])
 const targetsLoading = ref(false)
 const showForm = ref(false)
-const objective = ref<string>('Find SQLi, XSS, auth bypass, IDOR, and any real reproducible vulnerability. Report each with write_finding and a curl PoC.')
+const objective = ref<string>('寻找 SQL 注入、XSS、鉴权绕过、IDOR 以及任何真实可复现的漏洞，使用 write_finding 工具上报，每条都给出 curl 复现命令。')
 
 // auth section
 const authCookies = ref('')
@@ -25,11 +25,11 @@ const authHeaders = ref('')
 const authNote = ref('')
 
 const placeholders: Record<string, string> = {
-  auto: 'e.g. acme.com, https://acme.com, 10.0.0.1, or "Acme Corp"',
-  company: 'e.g. Acme Corp',
-  domain: 'e.g. acme.com',
-  url: 'e.g. https://acme.com/login',
-  ip: 'e.g. 10.0.0.1',
+  auto: '例如 acme.com、https://acme.com、10.0.0.1，或"某科技公司"',
+  company: '例如 某科技公司',
+  domain: '例如 acme.com',
+  url: '例如 https://acme.com/login',
+  ip: '例如 10.0.0.1',
 }
 
 const runCounts = computed(() => {
@@ -72,7 +72,7 @@ async function loadTargets() {
 
 async function start() {
   if (!target.value.trim()) {
-    error.value = 'Please enter a target'
+    error.value = '请输入目标'
     return
   }
   error.value = null
@@ -140,54 +140,54 @@ onMounted(loadTargets)
   <div class="col">
     <div class="eng-head">
       <div>
-        <h2 style="font-size: 20px; font-weight: 600; margin: 0">Engagements</h2>
-        <div class="muted" style="font-size: 13px; margin-top: 2px">Assets you've authorized the AI to recon and test</div>
+        <h2 style="font-size: 20px; font-weight: 600; margin: 0">授权目标</h2>
+        <div class="muted" style="font-size: 13px; margin-top: 2px">已授权 AI 进行侦察和测试的目标资产</div>
       </div>
-      <UiButton variant="primary" size="md" @click="showForm = !showForm">{{ showForm ? 'Close' : '＋ New engagement' }}</UiButton>
+      <UiButton variant="primary" size="md" @click="showForm = !showForm">{{ showForm ? '收起' : '＋ 新建目标' }}</UiButton>
     </div>
 
     <div v-if="showForm" class="card create-form">
       <div class="form-grid">
         <div>
-          <label class="field-label">Target</label>
+          <label class="field-label">目标</label>
           <input v-model="target" :placeholder="placeholders[targetType]" style="width: 100%" @keyup.enter="start" />
         </div>
         <div>
-          <label class="field-label">Type</label>
+          <label class="field-label">类型</label>
           <select v-model="targetType" style="width: 100%">
-            <option value="auto">Auto-detect</option>
-            <option value="company">Company</option>
-            <option value="domain">Domain</option>
+            <option value="auto">自动识别</option>
+            <option value="company">公司</option>
+            <option value="domain">域名</option>
             <option value="url">URL</option>
             <option value="ip">IP</option>
           </select>
         </div>
       </div>
       <div>
-        <label class="field-label">Objective</label>
+        <label class="field-label">目标说明（告诉 AI 重点找什么）</label>
         <textarea v-model="objective" rows="2" style="width: 100%" />
       </div>
       <details class="auth-details">
-        <summary>🔐 Authenticated session (optional) — give the AI your login to test behind-auth function points</summary>
+        <summary>🔐 身份会话（可选）— 填写登录信息以测试鉴权后接口</summary>
         <div class="auth-fields">
           <div>
-            <label class="field-label">Cookies (paste the Cookie header, e.g. <code>sessionid=abc; uid=1</code>)</label>
+            <label class="field-label">Cookie（粘贴 Cookie 头，例如 <code>sessionid=abc; uid=1</code>）</label>
             <textarea v-model="authCookies" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="sessionid=...; " />
           </div>
           <div>
-            <label class="field-label">Extra headers (<code>Key: value</code> per line)</label>
+            <label class="field-label">自定义请求头（每行 <code>Key: value</code>）</label>
             <textarea v-model="authHeaders" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="Authorization: Bearer ..." />
           </div>
           <div>
-            <label class="field-label">Note to the AI (who is this account?)</label>
-            <input v-model="authNote" style="width: 100%" placeholder="e.g. normal registered user, role=user" />
+            <label class="field-label">备注（这个账号是什么身份？）</label>
+            <input v-model="authNote" style="width: 100%" placeholder="例如：普通注册用户，role=user" />
           </div>
         </div>
       </details>
       <div v-if="error" style="color: var(--danger); font-size: 13px">{{ error }}</div>
       <div class="row">
         <UiButton variant="primary" size="lg" :disabled="loading" @click="start">
-          {{ loading ? 'Starting…' : 'Launch assessment' }}
+          {{ loading ? '启动中…' : '启动评估' }}
         </UiButton>
       </div>
     </div>
@@ -205,15 +205,15 @@ onMounted(loadTargets)
         <div class="eng-card-meta muted">{{ (sevByTarget[t.id] ? Object.entries(sevByTarget[t.id]).map(([s, c]) => `${s} ${c}`).join(' · ') : 'no findings') }}</div>
         <div class="eng-card-foot">
           <UiBadge v-if="lastRun[t.id]" kind="status" :value="lastRun[t.id].status" :dot="true" />
-          <span v-else class="muted" style="font-size: 11px">no runs yet</span>
-          <span class="muted" style="font-size: 11px">{{ runCounts[t.id] || 0 }} runs</span>
+          <span v-else class="muted" style="font-size: 11px">暂无运行</span>
+          <span class="muted" style="font-size: 11px">{{ runCounts[t.id] || 0 }} 次运行</span>
           <span class="spacer" />
-          <button class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="newRun(t)">New run</button>
-          <button style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="viewRuns(t)">History</button>
+          <button class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="newRun(t)">新建运行</button>
+          <button style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="viewRuns(t)">历史</button>
         </div>
       </div>
     </div>
-    <UiEmpty v-else-if="!targetsLoading" icon="◈" message="No engagements yet — create your first above" />
+    <UiEmpty v-else-if="!targetsLoading" icon="◈" message="暂无授权目标，点击右上角新建第一个" />
   </div>
 </template>
 

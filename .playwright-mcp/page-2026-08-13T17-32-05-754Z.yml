@@ -1,0 +1,98 @@
+- generic [ref=f3e3]:
+  - complementary [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - generic [ref=f3e6]: ⬢
+      - generic [ref=f3e7]: Dhunter
+    - generic [ref=f3e8]: Workspace
+    - link "◧ Dashboard" [ref=f3e9] [cursor=pointer]:
+      - /url: /dashboard
+      - generic [ref=f3e10]: ◧
+      - text: Dashboard
+    - link "◈ Engagements" [ref=f3e11] [cursor=pointer]:
+      - /url: /targets
+      - generic [ref=f3e12]: ◈
+      - text: Engagements
+    - link "⏵ Runs" [ref=f3e13] [cursor=pointer]:
+      - /url: /runs
+      - generic [ref=f3e14]: ⏵
+      - text: Runs
+    - link "⚑ Vulnerabilities" [ref=f3e15] [cursor=pointer]:
+      - /url: /vulns
+      - generic [ref=f3e16]: ⚑
+      - text: Vulnerabilities
+    - generic [ref=f3e17]: System
+    - link "⚙ Settings" [ref=f3e18] [cursor=pointer]:
+      - /url: /settings
+      - generic [ref=f3e19]: ⚙
+      - text: Settings
+    - generic [ref=f3e20]:
+      - generic [ref=f3e21]: A
+      - generic [ref=f3e22]: admin
+      - button "⏻" [ref=f3e23] [cursor=pointer]
+  - banner [ref=f3e24]:
+    - heading "Dashboard" [level=1] [ref=f3e25]
+    - generic [ref=f3e26]: 2026/8/14
+  - main [ref=f3e27]:
+    - generic [ref=f3e28]:
+      - generic [ref=f3e29]:
+        - generic [ref=f3e30]:
+          - generic [ref=f3e31]: ◈
+          - generic [ref=f3e32]:
+            - generic [ref=f3e33]: "2"
+            - generic [ref=f3e34]: Engagements
+        - generic [ref=f3e35]:
+          - generic [ref=f3e36]: ⏵
+          - generic [ref=f3e37]:
+            - generic [ref=f3e38]: "2"
+            - generic [ref=f3e39]: Total runs
+        - generic [ref=f3e40]:
+          - generic [ref=f3e41]: ⟳
+          - generic [ref=f3e42]:
+            - generic [ref=f3e43]: "0"
+            - generic [ref=f3e44]: Running now
+        - generic [ref=f3e45]:
+          - generic [ref=f3e46]: ⚑
+          - generic [ref=f3e47]:
+            - generic [ref=f3e48]: "1"
+            - generic [ref=f3e49]: Confirmed vulns
+      - generic [ref=f3e50]:
+        - generic [ref=f3e51]:
+          - generic [ref=f3e53]: critical
+          - generic [ref=f3e54]: "1"
+        - generic [ref=f3e55]:
+          - generic [ref=f3e57]: high
+          - generic [ref=f3e58]: "0"
+        - generic [ref=f3e59]:
+          - generic [ref=f3e61]: medium
+          - generic [ref=f3e62]: "0"
+        - generic [ref=f3e63]:
+          - generic [ref=f3e65]: low
+          - generic [ref=f3e66]: "0"
+        - generic [ref=f3e67]:
+          - generic [ref=f3e69]: info
+          - generic [ref=f3e70]: "0"
+      - generic [ref=f3e71]:
+        - generic [ref=f3e72]:
+          - heading "Recent runs" [level=3] [ref=f3e74]
+          - generic [ref=f3e75]:
+            - generic [ref=f3e76] [cursor=pointer]:
+              - generic [ref=f3e77]: success
+              - code [ref=f3e80]: 41c351af
+              - generic [ref=f3e81]: ef33a375-f4c8-4f9c-8153-963b054362c8
+              - generic [ref=f3e82]: 70 tok · 2026/8/14 01:15:44
+            - generic [ref=f3e83] [cursor=pointer]:
+              - generic [ref=f3e84]: success
+              - code [ref=f3e87]: 89643f39
+              - generic [ref=f3e88]: 54c7a027-3b93-4ec0-9724-30f8b1e9b2a1
+              - generic [ref=f3e89]: 70 tok · 2026/8/14 01:15:30
+        - generic [ref=f3e90]:
+          - heading "Latest findings" [level=3] [ref=f3e92]
+          - generic [ref=f3e93]:
+            - generic [ref=f3e94] [cursor=pointer]:
+              - generic [ref=f3e95]: critical
+              - generic [ref=f3e96]: SQL Injection in login (UNION-based auth bypass)
+              - generic [ref=f3e97]: confirmed
+            - generic [ref=f3e98] [cursor=pointer]:
+              - generic [ref=f3e99]: critical
+              - generic [ref=f3e100]: SQL Injection in login (UNION-based auth bypass)
+              - generic [ref=f3e101]: dismissed

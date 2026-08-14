@@ -62,6 +62,7 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 		Evidence       string `json:"evidence"`
 		Impact         string `json:"impact"`
 		Recommendation string `json:"recommendation"`
+		Reproduction   string `json:"reproduction"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json: " + err.Error()})
@@ -101,6 +102,7 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 		Evidence:       body.Evidence,
 		Impact:         body.Impact,
 		Recommendation: body.Recommendation,
+		Reproduction:   body.Reproduction,
 		CreatedAt:      time.Now().UTC(),
 	}
 	created, existingID, err := h.Stores.Vulns.CreateIfAbsent(c.Request.Context(), v)

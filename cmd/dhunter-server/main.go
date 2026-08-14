@@ -125,6 +125,37 @@ func main() {
 		reportH := handler.NewReportHandler(stores)
 		api.GET("/runs/:id/report", reportH.Markdown)
 
+		// Platform status — lets the UI self-describe the bundled services
+		// instead of asking the user to configure them by hand. The server
+		// probes its own MCP + agent sidecars (the browser can't, cross-origin).
+		api.GET("/status", func(c *gin.Context) {
+			hc := &http.Client{Timeout: 3 * time.Second}
+			probe := func(url string) string {
+				resp, err := hc.Get(url)
+				if err != nil {
+					return "disconnected"
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode < 500 {
+					return "connected"
+				}
+				return "disconnected"
+			}
+			agentURL := cfg.Agent.PythonURL
+			mcpBase := strings.TrimSuffix(cfg.MCP.WebHunter.URL, "/message")
+			c.JSON(http.StatusOK, gin.H{
+				"llm": gin.H{
+					"provider": cfg.LLM.Provider,
+					"model":    cfg.LLM.Model,
+					"base_url": cfg.LLM.BaseURL,
+					"key_set":  cfg.LLM.APIKey != "",
+				},
+				"mcp":   gin.H{"url": cfg.MCP.WebHunter.URL, "status": probe(mcpBase + "/health")},
+				"agent": gin.H{"url": agentURL, "status": probe(agentURL + "/healthz")},
+				"db":    gin.H{"path": cfg.Storage.SQLitePath},
+			})
+		})
+
 		// Board (blackboard): facts / intents / hints + graph export.
 		boardH := handler.NewBoardHandler(stores, hub)
 		api.GET("/runs/:id/facts", boardH.ListFacts)

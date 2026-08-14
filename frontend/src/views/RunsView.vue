@@ -30,7 +30,7 @@ async function load() {
     const res = await api.get('/runs')
     runs.value = Array.isArray(res.data) ? res.data : res.data?.runs || res.data?.items || []
   } catch (e: any) {
-    error.value = e?.response?.data?.error || e?.message || 'Failed to load runs'
+    error.value = e?.response?.data?.error || e?.message || '加载运行记录失败'
   } finally {
     loading.value = false
   }
@@ -41,8 +41,9 @@ function duration(r: Run): string {
   const s = new Date(r.started_at).getTime()
   const e = r.ended_at ? new Date(r.ended_at).getTime() : Date.now()
   const sec = Math.max(0, Math.round((e - s) / 1000))
-  if (sec < 60) return `${sec}s`
-  return `${Math.floor(sec / 60)}m${sec % 60}s`
+  if (sec < 60) return `${sec}秒`
+  if (sec < 3600) return `${Math.floor(sec / 60)}分${sec % 60}秒`
+  return `${Math.floor(sec / 3600)}时${Math.floor((sec % 3600) / 60)}分`
 }
 
 function tokens(r: Run): number {
@@ -66,10 +67,10 @@ onMounted(load)
   <div class="col">
     <div class="runs-head">
       <div>
-        <h2 style="font-size: 20px; font-weight: 600; margin: 0">Runs</h2>
-        <div class="muted" style="font-size: 13px; margin-top: 2px">{{ runs.length }} assessments executed</div>
+        <h2 style="font-size: 20px; font-weight: 600; margin: 0">运行记录</h2>
+        <div class="muted" style="font-size: 13px; margin-top: 2px">共 {{ runs.length }} 次评估</div>
       </div>
-      <button @click="load">↻ Refresh</button>
+      <button @click="load">↻ 刷新</button>
     </div>
 
     <div v-if="error" style="color: var(--danger)">{{ error }}</div>
@@ -77,12 +78,12 @@ onMounted(load)
       <table>
         <thead>
           <tr>
-            <th>Status</th>
-            <th>Target</th>
-            <th>Duration</th>
+            <th>状态</th>
+            <th>目标</th>
+            <th>耗时</th>
             <th>Tokens</th>
-            <th>Started</th>
-            <th>Summary</th>
+            <th>开始时间</th>
+            <th>摘要</th>
           </tr>
         </thead>
         <tbody>
@@ -100,7 +101,7 @@ onMounted(load)
         </tbody>
       </table>
     </div>
-    <UiEmpty v-else-if="!loading" icon="⏵" message="No runs yet — start one from Engagements" />
+    <UiEmpty v-else-if="!loading" icon="⏵" message="暂无运行记录，去授权目标发起一次扫描" />
   </div>
 </template>
 

@@ -152,6 +152,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"runs", "cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"runs", "cache_read_input_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"vulnerabilities", "norm_title TEXT NOT NULL DEFAULT ''"},
+		{"vulnerabilities", "reproduction TEXT NOT NULL DEFAULT ''"},
 		{"targets", "auth_context TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !d.columnExists(ctx, col.table, strings.TrimSpace(strings.SplitN(col.def, " ", 2)[0])) {

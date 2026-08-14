@@ -145,9 +145,9 @@ watch(runId, async (v) => {
     <div v-if="error" style="color: var(--danger)">{{ error }}</div>
 
     <div class="tabs">
-      <button :class="['tab', { active: tab === 'board' }]" @click="tab = 'board'">Attack Graph</button>
-      <button :class="['tab', { active: tab === 'stream' }]" @click="tab = 'stream'">Live Stream</button>
-      <button :class="['tab', { active: tab === 'report' }]" @click="tab = 'report'">Report</button>
+      <button :class="['tab', { active: tab === 'board' }]" @click="tab = 'board'">攻击图</button>
+      <button :class="['tab', { active: tab === 'stream' }]" @click="tab = 'stream'">实时事件</button>
+      <button :class="['tab', { active: tab === 'report' }]" @click="tab = 'report'">报告</button>
     </div>
 
     <div v-if="tab === 'board'" class="card" style="flex: 1; padding: 14px">
@@ -156,54 +156,54 @@ watch(runId, async (v) => {
 
     <div v-if="tab === 'stream' && (status === 'running' || status === 'pending' || events.length > 0)" class="run-panes">
       <div class="run-pane">
-        <div class="run-pane-header">Reasoning</div>
+        <div class="run-pane-header">推理过程</div>
         <div class="run-pane-body">
           <EventStream :events="events.filter((e) => e.type === 'reasoning_delta' || e.type === 'reasoning' || e.type === 'thinking')" />
         </div>
       </div>
       <div class="run-pane">
-        <div class="run-pane-header">Response</div>
+        <div class="run-pane-header">AI 回复</div>
         <div class="run-pane-body">
           <EventStream :events="events.filter((e) => e.type === 'response_delta' || e.type === 'response' || e.type === 'message')" />
         </div>
       </div>
       <div class="run-pane">
-        <div class="run-pane-header">Tool calls ({{ toolCalls.length }})</div>
+        <div class="run-pane-header">工具调用 ({{ toolCalls.length }})</div>
         <div class="run-pane-body">
           <table v-if="toolCalls.length > 0">
-            <thead><tr><th>Tool</th><th>Status</th><th>Time</th></tr></thead>
+            <thead><tr><th>工具</th><th>状态</th><th>时间</th></tr></thead>
             <tbody>
               <tr v-for="(tc, i) in toolCalls" :key="i">
                 <td><code style="font-size: 11px">{{ tc.call.data?.name || tc.call.data?.tool || '?' }}</code></td>
                 <td>
                   <span v-if="tc.result" :style="{ color: tc.result.data?.is_error ? 'var(--danger)' : 'var(--ok)' }">
-                    {{ tc.result.data?.is_error ? 'error' : 'ok' }}
+                    {{ tc.result.data?.is_error ? '失败' : '成功' }}
                   </span>
-                  <span v-else class="muted">pending</span>
+                  <span v-else class="muted">等待中</span>
                 </td>
-                <td class="muted" style="font-size: 11px">{{ tc.call.ts ? new Date(tc.call.ts).toLocaleTimeString() : '—' }}</td>
+                <td class="muted" style="font-size: 11px">{{ tc.call.ts ? new Date(tc.call.ts).toLocaleTimeString('zh-CN', { hour12: false }) : '—' }}</td>
               </tr>
             </tbody>
           </table>
-          <div v-else class="muted" style="padding: 12px; text-align: center; font-size: 12px">No tool calls yet</div>
+          <div v-else class="muted" style="padding: 12px; text-align: center; font-size: 12px">暂无工具调用</div>
         </div>
       </div>
     </div>
-    <UiEmpty v-else-if="tab === 'stream'" icon="⟳" message="Stream will appear when the agent runs" />
+    <UiEmpty v-else-if="tab === 'stream'" icon="⟳" message="Agent 运行时此处会显示实时事件流" />
 
     <div v-if="tab === 'report'" class="col" style="margin-top: 8px">
       <div class="row">
-        <h3 style="font-size: 14px; font-weight: 600">Report</h3>
+        <h3 style="font-size: 14px; font-weight: 600">报告</h3>
         <span class="spacer" />
-        <span class="muted" style="font-size: 12px">{{ runInfo?.finished_at ? `finished ${fmtTime(runInfo.finished_at)}` : '' }}</span>
+        <span class="muted" style="font-size: 12px">{{ runInfo?.finished_at ? `完成于 ${fmtTime(runInfo.finished_at)}` : '' }}</span>
       </div>
       <div class="card markdown" v-if="report"><div v-html="reportHtml" /></div>
-      <UiEmpty v-else icon="📄" message="No report available yet" />
+      <UiEmpty v-else icon="📄" message="暂无报告" />
 
-      <h3 style="font-size: 14px; font-weight: 600; margin-top: 12px">Vulnerabilities ({{ vulns.length }})</h3>
+      <h3 style="font-size: 14px; font-weight: 600; margin-top: 12px">漏洞列表（{{ vulns.length }}）</h3>
       <div v-if="vulns.length" class="card" style="padding: 0">
         <table>
-          <thead><tr><th>Severity</th><th>Title</th><th>Target</th><th>Status</th></tr></thead>
+          <thead><tr><th>严重度</th><th>标题</th><th>目标</th><th>状态</th></tr></thead>
           <tbody>
             <tr v-for="v in vulns" :key="v.id">
               <td><SeverityBadge :severity="v.severity || 'info'" /></td>
@@ -214,7 +214,7 @@ watch(runId, async (v) => {
           </tbody>
         </table>
       </div>
-      <UiEmpty v-else icon="⚑" message="No vulnerabilities found" />
+      <UiEmpty v-else icon="⚑" message="本次运行未发现漏洞" />
     </div>
   </div>
 </template>

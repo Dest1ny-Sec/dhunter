@@ -1,0 +1,73 @@
+- generic [ref=f8e3]:
+  - complementary [ref=f8e4]:
+    - generic [ref=f8e5]: Dhunter
+    - generic [ref=f8e11]:
+      - generic [ref=f8e12] [cursor=pointer]:
+        - generic [ref=f8e13]: 工作区
+        - generic [ref=f8e14]: ▾
+      - link "⊟ 仪表盘" [ref=f8e15] [cursor=pointer]:
+        - /url: /dashboard
+        - generic [ref=f8e16]: ⊟
+        - text: 仪表盘
+      - link "◇ 授权目标" [ref=f8e17] [cursor=pointer]:
+        - /url: /targets
+        - generic [ref=f8e18]: ◇
+        - text: 授权目标
+      - link "▶ 运行记录" [ref=f8e19] [cursor=pointer]:
+        - /url: /runs
+        - generic [ref=f8e20]: ▶
+        - text: 运行记录
+      - link "⚑ 漏洞成果" [ref=f8e21] [cursor=pointer]:
+        - /url: /vulns
+        - generic [ref=f8e22]: ⚑
+        - text: 漏洞成果
+    - generic [ref=f8e23]:
+      - generic [ref=f8e24] [cursor=pointer]:
+        - generic [ref=f8e25]: 系统
+        - generic [ref=f8e26]: ▾
+      - link "⚙ 设置" [ref=f8e27] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=f8e28]: ⚙
+        - text: 设置
+  - banner [ref=f8e29]:
+    - heading "设置" [level=1] [ref=f8e30]
+    - generic [ref=f8e31]:
+      - generic [ref=f8e32]: ⚲
+      - textbox "快速搜索..." [ref=f8e33]
+    - button "✉" [ref=f8e34] [cursor=pointer]
+    - button "🔔" [ref=f8e37] [cursor=pointer]
+    - generic "admin" [ref=f8e39] [cursor=pointer]: A
+  - main [ref=f8e40]:
+    - generic [ref=f8e41]:
+      - heading "设置" [level=2] [ref=f8e42]
+      - generic [ref=f8e43]: 平台服务状态 — 工具集与 Agent 由平台自带并自动管理，无需手动配置
+      - generic [ref=f8e44]:
+        - heading "平台服务（自动检测）" [level=3] [ref=f8e46]
+        - generic [ref=f8e47]:
+          - generic [ref=f8e48]:
+            - generic [ref=f8e49]:
+              - generic [ref=f8e50]: MCP 工具集 (http://127.0.0.1:19124/message)
+              - generic [ref=f8e51]: 20 个原创渗透工具，随平台启动
+            - generic [ref=f8e52]: disconnected
+          - generic [ref=f8e54]:
+            - generic [ref=f8e55]:
+              - generic [ref=f8e56]: Agent 引擎 (http://127.0.0.1:19100)
+              - generic [ref=f8e57]: 黑板调度器 + 多 worker，随平台启动
+            - generic [ref=f8e58]: disconnected
+          - generic [ref=f8e60]:
+            - generic [ref=f8e61]:
+              - generic [ref=f8e62]: 存储
+              - generic [ref=f8e63]: /tmp/dhunter-demo.db
+            - generic [ref=f8e64]: connected
+      - generic [ref=f8e66]:
+        - heading "大模型（部署时通过环境变量配置）" [level=3] [ref=f8e68]
+        - generic [ref=f8e69]:
+          - generic [ref=f8e70]:
+            - generic [ref=f8e71]:
+              - generic [ref=f8e72]: anthropic · mock
+              - generic [ref=f8e73]: https://api.minimaxi.com/anthropic
+            - generic [ref=f8e74]: connected
+          - generic [ref=f8e76]:
+            - text: 密钥通过
+            - code [ref=f8e77]: DHUNTER_LLM_KEY
+            - text: 环境变量注入，不存储在前端。

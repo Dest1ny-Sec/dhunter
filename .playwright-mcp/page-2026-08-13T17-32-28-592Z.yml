@@ -1,0 +1,64 @@
+- generic [ref=f5e3]:
+  - complementary [ref=f5e4]:
+    - generic [ref=f5e5]:
+      - generic [ref=f5e6]: ⬢
+      - generic [ref=f5e7]: Dhunter
+    - generic [ref=f5e8]: Workspace
+    - link "◧ Dashboard" [ref=f5e9] [cursor=pointer]:
+      - /url: /dashboard
+      - generic [ref=f5e10]: ◧
+      - text: Dashboard
+    - link "◈ Engagements" [ref=f5e11] [cursor=pointer]:
+      - /url: /targets
+      - generic [ref=f5e12]: ◈
+      - text: Engagements
+    - link "⏵ Runs" [ref=f5e13] [cursor=pointer]:
+      - /url: /runs
+      - generic [ref=f5e14]: ⏵
+      - text: Runs
+    - link "⚑ Vulnerabilities" [ref=f5e15] [cursor=pointer]:
+      - /url: /vulns
+      - generic [ref=f5e16]: ⚑
+      - text: Vulnerabilities
+    - generic [ref=f5e17]: System
+    - link "⚙ Settings" [ref=f5e18] [cursor=pointer]:
+      - /url: /settings
+      - generic [ref=f5e19]: ⚙
+      - text: Settings
+    - generic [ref=f5e20]:
+      - generic [ref=f5e21]: A
+      - generic [ref=f5e22]: admin
+      - button "⏻" [ref=f5e23] [cursor=pointer]
+  - banner [ref=f5e24]:
+    - heading "Engagements" [level=1] [ref=f5e25]
+    - generic [ref=f5e26]: 2026/8/14
+  - main [ref=f5e27]:
+    - generic [ref=f5e28]:
+      - generic [ref=f5e29]:
+        - generic [ref=f5e30]:
+          - heading "Engagements" [level=2] [ref=f5e31]
+          - generic [ref=f5e32]: Assets you've authorized the AI to recon and test
+        - button "＋ New engagement" [ref=f5e33] [cursor=pointer]
+      - generic [ref=f5e34]:
+        - generic [ref=f5e35]:
+          - generic [ref=f5e36]:
+            - generic [ref=f5e37]: url
+            - generic [ref=f5e38]: 2026/8/14
+          - generic [ref=f5e39] [cursor=pointer]: http://127.0.0.1:3000
+          - generic [ref=f5e40]: no findings
+          - generic [ref=f5e41]:
+            - generic [ref=f5e42]: success
+            - generic [ref=f5e44]: 1 runs
+            - button "New run" [ref=f5e45] [cursor=pointer]
+            - button "History" [ref=f5e46] [cursor=pointer]
+        - generic [ref=f5e47]:
+          - generic [ref=f5e48]:
+            - generic [ref=f5e49]: url
+            - generic [ref=f5e50]: 2026/8/14
+          - generic [ref=f5e51] [cursor=pointer]: http://127.0.0.1:3000
+          - generic [ref=f5e52]: no findings
+          - generic [ref=f5e53]:
+            - generic [ref=f5e54]: success
+            - generic [ref=f5e56]: 1 runs
+            - button "New run" [ref=f5e57] [cursor=pointer]
+            - button "History" [ref=f5e58] [cursor=pointer]

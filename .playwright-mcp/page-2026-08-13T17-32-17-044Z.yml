@@ -1,0 +1,113 @@
+- generic [ref=f4e3]:
+  - complementary [ref=f4e4]:
+    - generic [ref=f4e5]:
+      - generic [ref=f4e6]: ⬢
+      - generic [ref=f4e7]: Dhunter
+    - generic [ref=f4e8]: Workspace
+    - link "◧ Dashboard" [ref=f4e9] [cursor=pointer]:
+      - /url: /dashboard
+      - generic [ref=f4e10]: ◧
+      - text: Dashboard
+    - link "◈ Engagements" [ref=f4e11] [cursor=pointer]:
+      - /url: /targets
+      - generic [ref=f4e12]: ◈
+      - text: Engagements
+    - link "⏵ Runs" [ref=f4e13] [cursor=pointer]:
+      - /url: /runs
+      - generic [ref=f4e14]: ⏵
+      - text: Runs
+    - link "⚑ Vulnerabilities" [ref=f4e15] [cursor=pointer]:
+      - /url: /vulns
+      - generic [ref=f4e16]: ⚑
+      - text: Vulnerabilities
+    - generic [ref=f4e17]: System
+    - link "⚙ Settings" [ref=f4e18] [cursor=pointer]:
+      - /url: /settings
+      - generic [ref=f4e19]: ⚙
+      - text: Settings
+    - generic [ref=f4e20]:
+      - generic [ref=f4e21]: A
+      - generic [ref=f4e22]: admin
+      - button "⏻" [ref=f4e23] [cursor=pointer]
+  - banner [ref=f4e24]:
+    - heading "Run Detail" [level=1] [ref=f4e25]
+    - generic [ref=f4e26]: 2026/8/14
+  - main [ref=f4e27]:
+    - generic [ref=f4e28]:
+      - generic [ref=f4e29]:
+        - generic [ref=f4e30]:
+          - heading [level=2] [ref=f4e31]:
+            - text: Run
+            - code [ref=f4e32]: 41c351af
+          - generic [ref=f4e33]: success
+        - generic [ref=f4e35]:
+          - generic [ref=f4e37]:
+            - text: tokens
+            - generic [ref=f4e38]: 240 / 240
+          - generic [ref=f4e41]: in 70 · out 170 · cache 0
+        - generic [ref=f4e42]: 0 events
+      - generic [ref=f4e43]:
+        - button "Attack Graph" [ref=f4e44] [cursor=pointer]
+        - button "Live Stream" [ref=f4e45] [cursor=pointer]
+        - button "Report" [ref=f4e46] [cursor=pointer]
+      - generic [ref=f4e48]:
+        - generic [ref=f4e49]:
+          - generic [ref=f4e50]:
+            - strong [ref=f4e51]: Attack Graph
+            - generic [ref=f4e52]: 4 facts · 2 intents · 0 hints
+          - button "Fit view" [ref=f4e53] [cursor=pointer]
+        - generic [ref=f4e55]:
+          - generic [ref=f4e57]:
+            - generic:
+              - img:
+                - group "Edge from 6397dcad-2c5f-4ed8-a9bc-c16adfb4447a to intent:c426af34-2278-4bed-aa19-db6a1ac8bf2c" [ref=f4e58] [cursor=pointer]
+              - img:
+                - group "Edge from intent:c426af34-2278-4bed-aa19-db6a1ac8bf2c to 1882fdb6-892c-48ef-b51c-9fd90096ecfa" [ref=f4e61] [cursor=pointer]:
+                  - generic [ref=f4e62]: →
+              - img:
+                - group "Edge from 6397dcad-2c5f-4ed8-a9bc-c16adfb4447a to intent:d9e8db09-d7d5-4e2d-aa8e-e8b1c0606348" [ref=f4e64] [cursor=pointer]
+              - img:
+                - group "Edge from intent:d9e8db09-d7d5-4e2d-aa8e-e8b1c0606348 to bf57ab22-779f-466d-832d-4cd28c457673" [ref=f4e67] [cursor=pointer]:
+                  - generic [ref=f4e68]: →
+              - generic:
+                - group [ref=f4e70]:
+                  - generic [ref=f4e71] [cursor=pointer]:
+                    - generic [ref=f4e72]: 6397dcad-2
+                    - generic [ref=f4e73]: "target: http://127.0.0.1:3000"
+                    - generic [ref=f4e74]: origin
+                - group [ref=f4e75]:
+                  - generic [ref=f4e76] [cursor=pointer]:
+                    - generic [ref=f4e77]: 77d83c50-2
+                    - generic [ref=f4e78]: "objective: find exploitable vulnerabilities"
+                    - generic [ref=f4e79]: goal
+                - group [ref=f4e80]:
+                  - generic [ref=f4e81] [cursor=pointer]:
+                    - generic [ref=f4e82]: 1882fdb6-8
+                    - generic [ref=f4e83]: "Probed /rest/user/login with UNION payloads. Confirmed: the login endpoint reflects a UNIO"
+                    - generic [ref=f4e84]: intent:c426af34-2278-4bed-aa19-db6a1ac8bf2c
+                - group [ref=f4e85]:
+                  - generic [ref=f4e86] [cursor=pointer]:
+                    - generic [ref=f4e87]: bf57ab22-7
+                    - generic [ref=f4e88]: "Probed /rest/user/login with UNION payloads. Confirmed: the login endpoint reflects a UNIO"
+                    - generic [ref=f4e89]: intent:d9e8db09-d7d5-4e2d-aa8e-e8b1c0606348
+                - group [ref=f4e90]:
+                  - generic [ref=f4e91] [cursor=pointer]:
+                    - generic [ref=f4e92]: concluded
+                    - generic [ref=f4e93]: Probe /rest/user/login for SQL injection
+                    - generic [ref=f4e94]: worker w1
+                - group [ref=f4e95]:
+                  - generic [ref=f4e96] [cursor=pointer]:
+                    - generic [ref=f4e97]: concluded
+                    - generic [ref=f4e98]: Check /api/ for unauthenticated admin endpoints
+                    - generic [ref=f4e99]: worker w2
+          - generic [ref=f4e102]:
+            - button [ref=f4e103] [cursor=pointer]
+            - button [ref=f4e106] [cursor=pointer]
+            - button [ref=f4e109] [cursor=pointer]
+            - button [ref=f4e112] [cursor=pointer]
+          - img "Vue Flow mini map" [ref=f4e116]
+        - generic [ref=f4e125]:
+          - generic [ref=f4e126]: Hints (inject guidance the AI reads next turn)
+          - generic [ref=f4e127]:
+            - textbox "e.g. try /actuator/env, use admin/admin creds…" [ref=f4e128]
+            - button "Send" [ref=f4e129] [cursor=pointer]
