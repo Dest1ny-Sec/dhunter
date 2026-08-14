@@ -292,7 +292,12 @@ def parse_json_object(text: str) -> dict[str, Any]:
 # --- graph summary -------------------------------------------------------
 
 
-def render_graph_summary(graph: dict[str, Any], max_facts: int = 60) -> str:
+# Cap how many facts the planner/worker reads each turn — the LLM pays tokens
+# for the whole summary. Lower = cheaper but less context; 40 is a good balance.
+REASON_MAX_FACTS = int(os.environ.get("DHUNTER_REASON_MAX_FACTS", "40"))
+
+
+def render_graph_summary(graph: dict[str, Any], max_facts: int = REASON_MAX_FACTS) -> str:
     """Compact, token-cheap rendering of the board for LLM prompts.
     Facts are one line each; open intents and hints are listed. The full
     graph lives in the backend — this is the *summary* fed to the model."""
@@ -308,8 +313,8 @@ def render_graph_summary(graph: dict[str, Any], max_facts: int = 60) -> str:
         lines.append(f"(showing the latest {len(recent)} of {len(facts)} facts)")
     for i, f in enumerate(recent):
         desc = (f.get("description") or "").strip().replace("\n", " ")
-        if len(desc) > 200:
-            desc = desc[:200] + "…"
+        if len(desc) > 140:
+            desc = desc[:140] + "…"
         lines.append(f"- {f.get('id', '?')}: {desc}")
 
     open_its = [i for i in intents if i.get("status") in ("open", "claimed")]

@@ -96,6 +96,7 @@ class RunManager:
         await self._load_auth()
         await self._load_llm_config()
         await self._load_budget()
+        await self._load_knowledge()
         converged = False
         while time.monotonic() - self.started < OVERALL_TIMEOUT:
             graph = await self.board.graph(self.run.run_id)
@@ -169,6 +170,12 @@ class RunManager:
         # Quality gate: independently re-judge every pending finding.
         await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
 
+        # Learn reusable intel for future runs on this host family.
+        try:
+            await self._learn_knowledge(graph)
+        except Exception:  # noqa: BLE001
+            pass
+
         # final summary from the board
         summary = await self._build_summary()
         self.run.status = "success"
@@ -210,6 +217,60 @@ class RunManager:
                 log.info("run %s: token budget red line = %s", self.run.run_id, self.max_run_tokens)
         except Exception:  # noqa: BLE001
             pass
+
+    def _host_family(self) -> str:
+        """Root-domain family for cross-target knowledge reuse."""
+        target = self.run.target.lower().strip()
+        from urllib.parse import urlparse
+        host = urlparse(target).hostname or target
+        parts = host.split(".")
+        if len(parts) >= 2:
+            return ".".join(parts[-2:])
+        return host
+
+    async def _load_knowledge(self) -> None:
+        """Inject reusable intel from prior runs on this host family into the
+        system prompt so the agent starts with known endpoints/creds/fingerprints
+        instead of rediscovering them."""
+        try:
+            items = await self.board.get_knowledge(self._host_family())
+        except Exception:  # noqa: BLE001
+            return
+        if not items:
+            return
+        lines = ["\n# 跨目标先验知识（本域名族历史扫描结论，直接复用，不要重复发现）"]
+        for it in items[:30]:
+            v = (it.get("value") or "").strip().replace("\n", " ")
+            if len(v) > 180:
+                v = v[:180] + "…"
+            lines.append(f"- [{it.get('kind')}] {v}")
+        self.system_prompt += "\n".join(lines) + "\n"
+        log.info("run %s: loaded %d knowledge item(s) for %s", self.run.run_id, len(items), self._host_family())
+
+    async def _learn_knowledge(self, graph: dict[str, Any]) -> None:
+        """After convergence, extract reusable facts (endpoints, creds,
+        fingerprints) and store them for future runs on this host family."""
+        family = self._host_family()
+        import re as _re
+        added = 0
+        for f in (graph.get("facts") or []):
+            desc = (f.get("description") or "").strip()
+            if not desc:
+                continue
+            kind = None
+            low = desc.lower()
+            if "password" in low or "credential" in low or "token:" in low or "api key" in low or "账号" in low or "密码" in low:
+                kind = "credential"
+            elif _re.match(r"https?://", desc) or "/api/" in desc or ".kuaishou.com" in desc:
+                kind = "endpoint"
+            elif "fingerprint" in low or "vue" in low or "nginx" in low or "spring" in low or "版本" in low:
+                kind = "fingerprint"
+            if not kind:
+                continue
+            await self.board.add_knowledge(family, kind, desc)
+            added += 1
+        if added:
+            log.info("run %s: learned %d knowledge item(s) for %s", self.run.run_id, added, family)
 
     async def _budget_exhausted(self, graph: dict[str, Any]) -> bool:
         """True when cumulative run tokens exceed the configured budget."""

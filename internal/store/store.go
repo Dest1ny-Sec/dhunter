@@ -137,6 +137,7 @@ type Stores struct {
 	Findings  *FindingStore
 	Board     *Board
 	Settings  *SettingsStore
+	Knowledge *KnowledgeStore
 }
 
 // New constructs every store over the shared *db.DB.
@@ -151,6 +152,7 @@ func New(database *db.DB) *Stores {
 		Findings:  &FindingStore{db: database},
 		Board:     newBoard(database),
 		Settings:  &SettingsStore{db: database},
+		Knowledge: &KnowledgeStore{db: database},
 	}
 }
 
@@ -789,6 +791,65 @@ func (s *FindingStore) Append(ctx context.Context, f *Finding) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, f.RunID, vulnID, f.Category, f.SeverityScore, f.Summary, f.CreatedAt.UnixMilli())
 	return err
+}
+
+// ----- KnowledgeStore -----
+
+// Knowledge is a reusable intel item learned from a run.
+type Knowledge struct {
+	ID          string    `json:"id"`
+	HostFamily  string    `json:"host_family"`
+	Kind        string    `json:"kind"` // endpoint | credential | fingerprint | behavior
+	Value       string    `json:"value"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// KnowledgeStore persists cross-target intel.
+type KnowledgeStore struct{ db *db.DB }
+
+func (s *KnowledgeStore) Add(ctx context.Context, k *Knowledge) error {
+	// dedup: same host_family + kind + value is already known
+	var existing string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM knowledge WHERE host_family = ? AND kind = ? AND value = ? LIMIT 1`,
+		k.HostFamily, k.Kind, k.Value).Scan(&existing)
+	if err == nil {
+		return nil // already have it
+	}
+	if k.ID == "" {
+		k.ID = uuid.NewString()
+	}
+	if k.CreatedAt.IsZero() {
+		k.CreatedAt = time.Now().UTC()
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO knowledge (id, host_family, kind, value, created_at) VALUES (?, ?, ?, ?, ?)`,
+		k.ID, k.HostFamily, k.Kind, k.Value, k.CreatedAt.UnixMilli())
+	return err
+}
+
+func (s *KnowledgeStore) ListByFamily(ctx context.Context, hostFamily string, limit int) ([]*Knowledge, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, host_family, kind, value, created_at FROM knowledge
+		 WHERE host_family = ? ORDER BY created_at DESC LIMIT ?`, hostFamily, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*Knowledge, 0)
+	for rows.Next() {
+		var k Knowledge
+		var ms int64
+		if err := rows.Scan(&k.ID, &k.HostFamily, &k.Kind, &k.Value, &ms); err != nil {
+			return nil, err
+		}
+		k.CreatedAt = time.UnixMilli(ms).UTC()
+		out = append(out, &k)
+	}
+	return out, rows.Err()
 }
 
 // ----- SettingsStore -----

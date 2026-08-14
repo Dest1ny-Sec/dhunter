@@ -122,6 +122,48 @@ func (h *SettingsHandler) TestLLM(c *gin.Context) {
 	})
 }
 
+// KnowledgeList returns reusable intel for a host family.
+func (h *SettingsHandler) KnowledgeList(c *gin.Context) {
+	host := c.Query("host")
+	if host == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "host query required"})
+		return
+	}
+	items, err := h.Stores.Knowledge.ListByFamily(c.Request.Context(), host, 200)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"knowledge": items})
+}
+
+// KnowledgeAdd stores one reusable intel item.
+func (h *SettingsHandler) KnowledgeAdd(c *gin.Context) {
+	var body struct {
+		Host string `json:"host"`
+		Kind string `json:"kind"`
+		Value string `json:"value"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	if body.Host == "" || body.Value == "" || body.Kind == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "host/kind/value required"})
+		return
+	}
+	if len(body.Value) > 2000 {
+		body.Value = body.Value[:2000]
+	}
+	if err := h.Stores.Knowledge.Add(c.Request.Context(), &store.Knowledge{
+		HostFamily: body.Host, Kind: body.Kind, Value: body.Value, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // GetBudget returns the per-run token budget red line.
 func (h *SettingsHandler) GetBudget(c *gin.Context) {
 	raw, _ := h.Stores.Settings.Get(c.Request.Context(), KeyBudget)

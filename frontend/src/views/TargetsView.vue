@@ -25,6 +25,9 @@ const objective = ref<string>('寻找 SQL 注入、XSS、鉴权绕过、IDOR 以
 const authCookies = ref('')
 const authHeaders = ref('')
 const authNote = ref('')
+const authUser = ref('')
+const authPass = ref('')
+const authLoginUrl = ref('')
 // custom guardrails the AI must always follow
 const redLines = ref('')
 
@@ -91,9 +94,11 @@ async function start() {
 
     const cookies = authCookies.value.trim()
     const hasHeaders = authHeaders.value.trim().length > 0
-    if (cookies || hasHeaders) {
+    const hasLogin = authUser.value.trim() && authPass.value
+    if (cookies || hasHeaders || hasLogin) {
       await api.patch(`/targets/${targetId}/auth`, {
         cookies, headers: parseHeaders(authHeaders.value), note: authNote.value.trim(),
+        username: authUser.value.trim(), password: authPass.value, login_url: authLoginUrl.value.trim(),
       })
     }
     const reds = redLines.value.trim()
@@ -120,6 +125,9 @@ function resetForm() {
   authCookies.value = ''
   authHeaders.value = ''
   authNote.value = ''
+  authUser.value = ''
+  authPass.value = ''
+  authLoginUrl.value = ''
   redLines.value = ''
   showForm.value = false
   error.value = null
@@ -204,6 +212,18 @@ onMounted(() => {
           <div>
             <label class="field-label">Cookie（粘贴 Cookie 头，例如 <code>sessionid=abc; uid=1</code>）</label>
             <textarea v-model="authCookies" rows="2" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="sessionid=...; " />
+          </div>
+          <div>
+            <label class="field-label">账号（用于自主登录测试鉴权后接口）</label>
+            <input v-model="authUser" style="width: 100%" placeholder="例如 test@example.com" />
+          </div>
+          <div>
+            <label class="field-label">密码</label>
+            <input v-model="authPass" type="password" style="width: 100%" />
+          </div>
+          <div>
+            <label class="field-label">登录地址（可选，自动探测登录接口）</label>
+            <input v-model="authLoginUrl" style="width: 100%" placeholder="例如 https://kolors.kuaishou.com/login" />
           </div>
           <div>
             <label class="field-label">自定义请求头（每行 <code>Key: value</code>）</label>

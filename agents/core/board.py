@@ -78,6 +78,24 @@ class BoardClient:
         data = resp.json()
         return data or {}
 
+    async def get_knowledge(self, host: str) -> list[dict[str, Any]]:
+        """Fetch reusable intel learned from prior runs on this host family."""
+        try:
+            resp = await self._request("GET", f"/api/knowledge?host={host}")
+            if resp.status_code < 400:
+                data = resp.json()
+                return data.get("knowledge") or []
+        except Exception:  # noqa: BLE001
+            pass
+        return []
+
+    async def add_knowledge(self, host: str, kind: str, value: str) -> None:
+        """Store a reusable intel item for a host family."""
+        try:
+            await self._request("POST", "/api/knowledge", json={"host": host, "kind": kind, "value": value[:2000]})
+        except Exception:  # noqa: BLE001
+            pass
+
     async def get_budget(self) -> dict[str, Any]:
         """Fetch the per-run token budget red line."""
         try:

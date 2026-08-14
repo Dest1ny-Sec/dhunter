@@ -139,6 +139,8 @@ func main() {
 		api.POST("/settings/llm/test", settingsH.TestLLM)
 		api.GET("/settings/budget", settingsH.GetBudget)
 		api.PUT("/settings/budget", settingsH.SaveBudget)
+		api.GET("/knowledge", settingsH.KnowledgeList)
+		api.POST("/knowledge", settingsH.KnowledgeAdd)
 
 		api.GET("/status", func(c *gin.Context) {
 			hc := &http.Client{Timeout: 3 * time.Second}

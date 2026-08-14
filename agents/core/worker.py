@@ -30,24 +30,31 @@ _DEAD_END_MARKERS = (
 
 
 def render_auth_note(auth: dict[str, Any] | None) -> str:
-    """Describe the authenticated session to the LLM (without dumping huge
-    values), and remind it to compare anonymous vs authenticated access."""
+    """Describe the authenticated session / account to the LLM and tell it
+    how to reach behind-auth functionality (log in, capture the session)."""
     if not auth:
-        return "No authenticated session is configured. Test the public surface only."
+        return "没有已配置的登录会话。只测公开面。"
     cookies = (auth.get("cookies") or "")
     headers = (auth.get("headers") or {})
     note = auth.get("note") or ""
-    lines = ["An authenticated session is configured for this target. http_request "
-             "will AUTO-ATTACH these to requests whose URL matches the target host."]
+    username = (auth.get("username") or "")
+    password = (auth.get("password") or "")
+    login_url = (auth.get("login_url") or "")
+    lines = ["目标配置了登录会话。http_request 会自动为匹配该目标的请求附加已存 Cookie。"]
     if cookies:
-        lines.append(f"- cookies: {cookies[:200]}{'…' if len(cookies) > 200 else ''}")
+        lines.append(f"- 已有 Cookie: {cookies[:200]}{'…' if len(cookies) > 200 else ''}")
     for k, v in (headers or {}).items():
-        lines.append(f"- header {k}: {str(v)[:120]}")
+        lines.append(f"- 请求头 {k}: {str(v)[:120]}")
+    if username and password:
+        lines.append(f"- 账号: {username} / 密码已提供")
+        if login_url:
+            lines.append(f"- 登录地址: {login_url}")
+        lines.append("- 如果还没登录：找到登录接口（POST 表单或 JSON），用 http_request 提交账号密码，"
+                     "从响应 Set-Cookie 拿到会话，然后调用 `session_set` 保存——之后 http_request 会自动携带。"
+                     "登录后重点测：IDOR、越权、登录后才可见的业务接口、权限提升。")
     if note:
-        lines.append(f"- note: {note}")
-    lines.append("- To test the ANONYMOUS surface, call http_request with `inject_auth: false`. "
-                 "Compare anonymous vs authenticated responses to hunt for IDOR / privilege "
-                 "escalation / missing-auth issues.")
+        lines.append(f"- 备注: {note}")
+    lines.append("- 测匿名面时，http_request 传 `inject_auth: false`；对比匿名 vs 已登录响应来找越权/IDOR。")
     return "\n".join(lines)
 
 

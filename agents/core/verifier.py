@@ -30,15 +30,19 @@ VERIFY_ENABLED = os.environ.get("DHUNTER_VERIFY", "1") != "0"
 # Phenomena that SRC programs typically reject outright. Used as a hard
 # pre-filter in addition to the LLM's judgment, so a weak LLM can't sneak
 # scanner-noise through.
+# Phenomena that are NEVER a vuln on their own (dismiss outright even with
+# an exploit marker). NOTE: "internal hostname exposed" / "internal system
+# reachable" is deliberately NOT here — an internal system reachable from the
+# public internet CAN be a reportable SRC finding IF the tester demonstrates
+# access to data or unauthenticated functionality. Those go to the LLM for
+# an evidence-based judgment instead of being auto-dismissed.
 _REJECT_HINTS = (
     "cors", "access-control-allow-origin", "missing security header",
     "security header", "hsts", "strict-transport-security", "x-frame-options",
-    "x-content-type-options", "tls", "ssl", "https", "http accepted",
+    "x-content-type-options", "tls", "ssl", "http accepted",
     "plain http", "version disclosure", "version leak", "server version",
     "source map", "sourcemap", "self-xss", "open redirect", "rate limit",
     "rate limiting", "directory listing", "directory index", "favicon",
-    "internal hostname", "internal ip", "ip address disclosure",
-    "information disclosure", "stack trace", "error page",
 )
 # If a title matches a reject hint AND the evidence shows no actual exploit
 # (no data pulled, no bypass, no execution), it's noise.
@@ -62,18 +66,26 @@ impact, backed by evidence:
   - injection that retrieves data or executes code
   - any concrete, reproducible exploit whose PoC shows the harm
 
-DISMISS findings that are phenomena / config noise, even if technically true:
+DISMISS phenomena / config noise, even if technically true:
   - CORS misconfiguration (unless it demonstrably enables a working cross-origin
     data theft — a reflected Access-Control-Allow-Origin alone is NOT a vuln)
   - missing / weak security headers, HSTS, TLS or "plain HTTP accepted" notes
   - version / fingerprint / stack / framework disclosure
   - endpoint existence, API path enumeration, or "graphql is reachable"
-  - internal hostname / IP / path disclosure with no demonstrated impact
   - open redirect (unless chained to something harmful)
   - rate limiting, self-XSS, directory listing, SourceMap exposure
 
-Severity must follow SRC norms: a config issue is at most LOW. Only a finding
-with proven data access / auth bypass / code execution may be HIGH or CRITICAL.
+CRITICAL distinction for internal systems:
+  - "Internal system reachable from the public internet" is NOT automatically
+    noise. It is CONFIRMABLE when the tester DEMONSTRATED access to data or
+    unauthenticated functionality (e.g. "browsed the admin panel and read user
+    records", "queried the internal API and got data"). Report it.
+  - An error page / banner / header that merely LEAKS an internal hostname or
+    username, with no data access, is info-level → dismiss.
+
+Severity follows SRC norms: a config issue is at most LOW. Only a finding with
+proven data access / auth bypass / code execution may be HIGH or CRITICAL.
+An internal system you actually accessed data through is typically HIGH.
 
 ## Finding
 Title: {title}

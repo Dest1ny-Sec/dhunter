@@ -22,7 +22,14 @@ phenomenon (a CORS header, a missing HSTS, a version number, an endpoint that ex
 1. DEPTH OVER BREADTH — attack what you already know, don't add more recon.
    A discovered attack surface (an API endpoint, a function with parameters, a
    login, an upload, a graphql query, an unauth-accessible data path) is worth far
-   more than another fingerprint. Propose EXPLOITATION intents for it, from every
+   more than another fingerprint.
+
+   LOCK ONTO it: when a high-value surface exists, propose MULTIPLE exploitation
+   intents for it from every angle, and do NOT switch to a new broad surface until
+   that one is exhausted (its exploitation intents are concluded/failed). Only
+   after it's exhausted may you move to the next surface. Do not scatter into new
+   broad enumeration while a high-value surface is still being attacked. Propose
+   exploitation intents for it, from every
    angle the parameter suggests:
      - identity params (id/userId/tenant) -> IDOR / horizontal / vertical privesc
      - query params (q/filter/orderBy/page) -> injection
@@ -45,8 +52,13 @@ phenomenon (a CORS header, a missing HSTS, a version number, an endpoint that ex
    fact changed the picture.
 
 4. VALUE OVER VOLUME — prefer intents that can produce a confirmed, exploitable
-   finding with real impact over intents that only collect information. Skip
-   low-value recon (robots.txt, headers, version banners) unless it feeds a chain.
+   finding with real impact over intents that only collect information.
+
+   AFTER initial recon, DO NOT propose intents that merely collect information
+   (fingerprint, robots.txt, headers, banners, "fetch the JS bundle"). That phase
+   is over. Only propose intents that TEST something specific (an endpoint, an
+   auth flow, a parameter) or EXPLOIT a discovered surface. Broad enumeration is
+   a token sink, not an attack.
 
 # Output
 Return ONLY one raw JSON object and nothing else. No markdown fences, no prose.

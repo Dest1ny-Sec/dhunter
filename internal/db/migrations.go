@@ -139,6 +139,17 @@ var migrations = []string{
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL DEFAULT ''
 	);`,
+
+	// knowledge — cross-target reusable intel (endpoints, creds, fingerprints)
+	// learned from one run and injected into later runs on the same host family.
+	`CREATE TABLE IF NOT EXISTS knowledge (
+		id          TEXT PRIMARY KEY,
+		host_family TEXT NOT NULL,
+		kind        TEXT NOT NULL,
+		value       TEXT NOT NULL,
+		created_at  INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_knowledge_host ON knowledge(host_family);`,
 }
 
 // Migrate runs every DDL statement in order, then applies per-column

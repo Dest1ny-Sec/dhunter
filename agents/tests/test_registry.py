@@ -16,8 +16,9 @@ def test_fallback_tool_defs_have_valid_schemas():
         assert t["name"]
         assert t["description"]
         assert t["input_schema"]["type"] == "object"
-        # every tool whose handler exists must have a matching def
-        assert t["name"] in _FALLBACK_HANDLERS
+        # every tool whose handler exists must have a matching def;
+        # session_set is handled specially in ToolRegistry.call()
+        assert t["name"] in _FALLBACK_HANDLERS or t["name"] == "session_set"
 
 
 def test_http_request_validates_url():

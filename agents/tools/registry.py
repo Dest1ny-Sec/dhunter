@@ -216,6 +216,23 @@ _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "session_set",
+        "description": (
+            "Save an authenticated session after logging in. Pass the Cookie "
+            "header (from the login response's Set-Cookie). Subsequent "
+            "http_request calls matching this target auto-attach it, letting "
+            "you test behind-auth endpoints (IDOR / privilege escalation)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cookie": {"type": "string", "description": "The Cookie header value to use from now on."},
+                "run_id": {"type": "string", "description": "Optional run id. Auto-set by the agent."},
+            },
+            "required": ["cookie"],
+        },
+    },
+    {
         "name": "write_finding",
         "description": (
             "Record a confirmed vulnerability to the Dhunter backend. Call ONLY after "
@@ -364,6 +381,18 @@ class ToolRegistry:
 
     async def call(self, name: str, arguments: dict[str, Any] | None = None, *, current_run_id: str = "") -> dict[str, Any]:
         args = arguments or {}
+        # session_set: store a logged-in session cookie for this run so
+        # subsequent http_request calls auto-attach it.
+        if name == "session_set":
+            cookie = str(args.get("cookie") or args.get("cookies") or "").strip()
+            if not cookie:
+                return {"content": "session_set: `cookie` is required", "is_error": True}
+            if not current_run_id:
+                return {"content": "session_set: no run_id available", "is_error": True}
+            auth = dict(self._run_auths.get(current_run_id) or {})
+            auth["cookies"] = cookie
+            self.set_run_auth(current_run_id, auth)
+            return {"content": "session_set: 已保存登录会话，后续请求自动携带该 Cookie", "is_error": False}
         if name in _FALLBACK_HANDLERS:
             handler = _FALLBACK_HANDLERS[name]
             # write_finding / write_fact need the current run_id.
