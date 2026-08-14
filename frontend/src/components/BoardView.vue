@@ -6,6 +6,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import dagre from 'dagre'
 import { api } from '../api/client'
+import { onEnter } from '../utils/ime'
 
 const props = defineProps<{ runId: string }>()
 
@@ -248,7 +249,7 @@ const statusLabel: Record<string, string> = { open: '待执行', claimed: '进�
     <div class="hint-block">
       <div class="muted" style="font-size: 11px">提示（注入给 AI 下一轮读取的指引）</div>
       <div class="hint-input">
-        <input v-model="hintText" placeholder="例如：试试 /actuator/env、用 admin/admin 登录…" @keyup.enter="sendHint" />
+        <input v-model="hintText" placeholder="例如：试试 /actuator/env、用 admin/admin 登录…" @keyup.enter="onEnter(sendHint)" />
         <button class="primary" style="min-height: 34px" @click="sendHint">Send</button>
         <span v-if="hintMsg" class="muted" style="font-size: 11px">{{ hintMsg }}</span>
       </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { onEnter } from '../utils/ime'
 import { api } from '../api/client'
 import UiButton from '../components/ui/UiButton.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
@@ -189,7 +190,7 @@ onMounted(() => {
         </div>
         <div>
           <label class="field-label">目标</label>
-          <input v-model="target" :placeholder="placeholders[targetType]" style="width: 100%" @keyup.enter="start" />
+          <input v-model="target" :placeholder="placeholders[targetType]" style="width: 100%" @keyup.enter="onEnter(start)" />
         </div>
         <div>
           <label class="field-label">类型</label>
