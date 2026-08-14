@@ -40,7 +40,7 @@ class BoardClient:
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0))
+            self._client = httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0))
         return self._client
 
     async def aclose(self) -> None:

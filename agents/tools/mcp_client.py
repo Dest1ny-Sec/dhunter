@@ -52,7 +52,7 @@ class MCPClient:
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
+            self._client = httpx.AsyncClient(trust_env=False, 
                 timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0),
             )
         return self._client

@@ -148,7 +148,7 @@ async def stream_chat(
     log.debug("LLM request: POST %s model=%s msgs=%d tools=%d", url, model, len(messages), len(tools or []))
 
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(trust_env=False, timeout=timeout) as client:
         async with client.stream("POST", url, json=payload, headers=headers) as resp:
             if resp.status_code >= 400:
                 # Drain body for the error message, then raise
@@ -251,7 +251,7 @@ async def create_message(
 
     url = f"{base_url}/v1/messages"
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(trust_env=False, timeout=timeout) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()

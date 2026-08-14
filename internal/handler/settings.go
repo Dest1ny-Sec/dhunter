@@ -41,14 +41,12 @@ func NewSettingsHandler(s *store.Stores) *SettingsHandler {
 	return &SettingsHandler{Stores: s}
 }
 
-// GetLLM returns the saved LLM config with the key masked.
+// GetLLM returns the saved LLM config. The endpoint is behind the admin
+// token, so it returns the REAL key — the agent uses this to configure its
+// runs, and masking here would break it with a 401.
 func (h *SettingsHandler) GetLLM(c *gin.Context) {
 	cfg := h.loadLLM(c.Request.Context())
-	masked := cfg
-	if masked.APIKey != "" {
-		masked.APIKey = maskKey(cfg.APIKey)
-	}
-	c.JSON(http.StatusOK, masked)
+	c.JSON(http.StatusOK, cfg)
 }
 
 type llmSaveReq struct {

@@ -183,7 +183,7 @@ class OpenAIAdapter:
 
         url = f"{self.base_url}/chat/completions"
         timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(trust_env=False, timeout=timeout) as client:
             async with client.stream("POST", url, json=payload, headers=self._headers()) as resp:
                 if resp.status_code >= 400:
                     body = await resp.aread()

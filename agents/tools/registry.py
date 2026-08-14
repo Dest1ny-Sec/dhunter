@@ -51,7 +51,7 @@ async def _http_request(args: dict[str, Any]) -> dict[str, Any]:
     # (self-signed targets).
     insecure = bool(args.get("insecure", False))
     try:
-        async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True, verify=not insecure) as client:
+        async with httpx.AsyncClient(trust_env=False, timeout=timeout_s, follow_redirects=True, verify=not insecure) as client:
             resp = await client.request(method, url, headers=headers, content=body)
         text = resp.text
         truncated = False
@@ -107,7 +107,7 @@ async def _write_finding(args: dict[str, Any], current_run_id: str = "") -> dict
     if backend_token:
         headers["Authorization"] = f"Bearer {backend_token}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(trust_env=False, timeout=15.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
         if resp.status_code >= 400:
             return {
@@ -153,7 +153,7 @@ async def _write_fact(args: dict[str, Any], current_run_id: str = "") -> dict[st
     if backend_token:
         headers["Authorization"] = f"Bearer {backend_token}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(trust_env=False, timeout=15.0) as client:
             resp = await client.post(url, json={"description": description, "source": "agent"}, headers=headers)
         if resp.status_code >= 400:
             return {"content": f"write_fact: backend rejected HTTP {resp.status_code} {resp.text[:300]}", "is_error": True}
