@@ -110,6 +110,11 @@ function connectSSE() {
         if (Array.isArray(ev.data?.vulns)) vulns.value = ev.data.vulns
       }
       if (ev.type === 'run_failed' || ev.type === 'error') status.value = 'failed'
+      if (ev.type === 'run_cancelled') status.value = 'cancelled'
+      // terminal — stop reconnecting
+      if (ev.type === 'run_complete' || ev.type === 'run_finished' || ev.type === 'run_failed' || ev.type === 'error' || ev.type === 'run_cancelled') {
+        if (sseRef.value) { sseRef.value.close(); sseRef.value = null }
+      }
       if (ev.type === 'vulnerability' || ev.type === 'vuln') vulns.value.push(ev.data)
       if (ev.type === 'report_delta') {
         const d = ev.data

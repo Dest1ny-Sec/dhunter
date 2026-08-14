@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import UiButton from '../components/ui/UiButton.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const target = ref('')
 const targetType = ref<'auto' | 'company' | 'domain' | 'url' | 'ip'>('auto')
@@ -140,7 +141,11 @@ function viewRuns(t: any) {
   router.push(`/targets/${t.id}/runs`)
 }
 
-onMounted(loadTargets)
+onMounted(() => {
+  loadTargets()
+  if (route.query.new === '1') showForm.value = true
+  if (typeof route.query.target === 'string' && route.query.target) target.value = route.query.target
+})
 </script>
 
 <template>

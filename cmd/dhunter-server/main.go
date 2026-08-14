@@ -49,13 +49,6 @@ func main() {
 		cfg.Server.Port = *port
 	}
 
-	// --- Bootstrap admin password (first run only) -----------------
-	passwordHash, generated, err := bootstrapAdmin(cfg)
-	if err != nil {
-		log.Fatalf("dhunter: bootstrap admin: %v", err)
-	}
-	printBanner(cfg, generated)
-
 	// --- Database --------------------------------------------------
 	database, err := db.Open(cfg.Storage.SQLitePath)
 	if err != nil {
@@ -74,13 +67,20 @@ func main() {
 	}
 	// Crash recovery: runs left "running" by a previous process have no
 	// live agent session — mark them failed instead of hanging forever.
-	if err := store.New(database).Runs.RecoverStale(bootCtx); err != nil {
+	stores := store.New(database)
+	if err := stores.Runs.RecoverStale(bootCtx); err != nil {
 		log.Printf("dhunter: warn: recover stale runs: %v", err)
 	}
 	cancelBoot()
 
+	// --- Bootstrap admin password (stable across restarts) ---------
+	passwordHash, generated, err := bootstrapAdmin(cfg, stores.Settings)
+	if err != nil {
+		log.Fatalf("dhunter: bootstrap admin: %v", err)
+	}
+	printBanner(cfg, generated)
+
 	// --- Stores / hub / agent bridge -------------------------------
-	stores := store.New(database)
 	hub := stream.New()
 	bridge := agent.New(cfg.Agent.PythonURL, stores, hub)
 
@@ -216,10 +216,14 @@ func main() {
 }
 
 // bootstrapAdmin returns the bcrypt hash to use for the admin password.
-// If a bootstrap password is configured in YAML, we hash it. Otherwise
-// we generate a fresh 16-byte random password, print it once in the
-// banner, and hash it. The plaintext is never persisted.
-func bootstrapAdmin(cfg *config.Config) (hash string, generated bool, err error) {
+// If a bootstrap password is configured in YAML, we hash it. Otherwise we
+// reuse a previously generated password (persisted in the settings table)
+// so restarts don't invalidate the operator's session; only the very first
+// run generates and prints a fresh random password.
+func bootstrapAdmin(cfg *config.Config, settings *store.SettingsStore) (hash string, generated bool, err error) {
+	const key = "admin_password_hash"
+	ctx := context.Background()
+
 	if cfg.Admin.BootstrapPassword != "" {
 		h, err := bcrypt.GenerateFromPassword([]byte(cfg.Admin.BootstrapPassword), bcrypt.DefaultCost)
 		if err != nil {
@@ -227,6 +231,12 @@ func bootstrapAdmin(cfg *config.Config) (hash string, generated bool, err error)
 		}
 		return string(h), false, nil
 	}
+	// Reuse the stored hash if it exists (stable password across restarts).
+	if existing, _ := settings.Get(ctx, key); existing != "" {
+		cfg.Admin.BootstrapPassword = "[persisted]"
+		return existing, false, nil
+	}
+	// First run: generate, persist the hash, and print the plaintext once.
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return "", false, err
@@ -234,6 +244,9 @@ func bootstrapAdmin(cfg *config.Config) (hash string, generated bool, err error)
 	plain := hex.EncodeToString(raw)
 	h, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
 	if err != nil {
+		return "", false, err
+	}
+	if err := settings.Set(ctx, key, string(h)); err != nil {
 		return "", false, err
 	}
 	// Stash the plaintext on the config so the banner can print it.

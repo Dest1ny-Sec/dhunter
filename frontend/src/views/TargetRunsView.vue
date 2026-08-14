@@ -61,7 +61,8 @@ async function load() {
 }
 
 function startNewRun() {
-  router.push(`/targets/${targetId.value}?new=1`)
+  const v = target.value?.value || target.value?.normalized || ''
+  router.push(`/targets?new=1${v ? '&target=' + encodeURIComponent(v) : ''}`)
 }
 function openRun(r: any) {
   router.push(`/runs/${r.id}`)
