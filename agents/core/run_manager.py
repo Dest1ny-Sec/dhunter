@@ -97,6 +97,12 @@ class RunManager:
         await self._load_llm_config()
         await self._load_budget()
         await self._load_knowledge()
+        # Make sure the MCP toolbelt is loaded (retries after a startup race).
+        await self.registry.ensure_mcp()
+        if self.registry.mcp_status().get("tool_count"):
+            log.info("run %s: MCP toolbelt loaded (%d tools)", self.run.run_id, self.registry.mcp_status()["tool_count"])
+        else:
+            log.warning("run %s: MCP not loaded yet, starting with fallback tools", self.run.run_id)
         converged = False
         while time.monotonic() - self.started < OVERALL_TIMEOUT:
             graph = await self.board.graph(self.run.run_id)
@@ -147,6 +153,9 @@ class RunManager:
                 if outcome in ("noop", "complete"):
                     converged = True
                     break
+
+            # Retry MCP connection periodically (the sidecar may come up later).
+            await self.registry.ensure_mcp()
 
             # Verify pending findings periodically so confirmed results
             # surface while the run is still digging.

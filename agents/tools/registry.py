@@ -339,6 +339,7 @@ class ToolRegistry:
         self._mcp_tools: list[dict[str, Any]] = []
         self._initialized = False
         self._init_error: str | None = None
+        self._last_init_attempt = 0.0
         # run_id -> auth context {cookies, headers, note, host} injected into
         # http_request calls for that run (see set_run_auth / _inject_auth).
         self._run_auths: dict[str, dict[str, Any]] = {}
@@ -398,16 +399,28 @@ class ToolRegistry:
     async def initialize(self) -> None:
         if self._initialized:
             return
+        self._last_init_attempt = time.monotonic()
         try:
             await self.mcp.initialize()
             self._mcp_tools = await self.mcp.list_tools()
+            self._init_error = None
             log.info("MCP ready: %d tools loaded", len(self._mcp_tools))
+            self._initialized = True
         except (MCPError, httpx.HTTPError, OSError) as e:
-            log.warning("MCP unavailable, fallback tools only: %s", e)
+            log.warning("MCP unavailable (will retry): %s", e)
             self._init_error = str(e)
             self._mcp_tools = []
-        finally:
-            self._initialized = True
+            # NOT marked initialized — ensure_mcp will retry with backoff.
+
+    async def ensure_mcp(self) -> None:
+        """Make sure MCP tools are loaded, retrying after a transient startup
+        failure (the MCP sidecar may boot a moment after the agent). Returns
+        after an attempt or if already ready."""
+        if self._initialized:
+            return
+        if time.monotonic() - self._last_init_attempt < 5.0:
+            return  # backoff — don't hammer a down sidecar
+        await self.initialize()
 
     async def aclose(self) -> None:
         await self.mcp.aclose()
@@ -478,9 +491,8 @@ class ToolRegistry:
             if name == "http_request":
                 args = self._inject_auth(args, current_run_id)
             return await handler(args)
-        # Delegate to MCP. If MCP was never initialised, try a one-shot init.
-        if not self._initialized:
-            await self.initialize()
+        # Delegate to MCP. Ensure MCP is loaded (retries after startup races).
+        await self.ensure_mcp()
         try:
             result = await self.mcp.call_tool(name, args)
         except (MCPError, httpx.HTTPError, OSError) as e:
