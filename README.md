@@ -61,14 +61,25 @@
 
 ## 🚀 快速开始
 
+### 环境要求
+
+| 依赖 | 版本 | 用途 |
+|---|---|---|
+| **Go** | 1.22+ | server + MCP 工具集（纯 Go 无 CGO，单静态二进制） |
+| **Python** | 3.10+ | agent（黑板调度器） |
+| **Node.js** | 18+ | 构建前端（仅源码部署时需要；仓库已带预构建 dist 可跳过） |
+| 外部扫描器 | 可选 | 见 [外部工具依赖](#-外部工具依赖可选)，缺失自动跳过 |
+
 ### 一键启动（推荐）
 
 ```bash
-# macOS / Linux
-./scripts/start-dhunter.sh start
+# 先装外部扫描器（可选，缺失会自动跳过）
+./scripts/setup-tools.sh                                   # macOS / Linux
+powershell -ExecutionPolicy Bypass -File scripts\setup-tools.ps1   # Windows
 
-# Windows
-powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start
+# 启动三件套
+./scripts/start-dhunter.sh start                           # macOS / Linux
+powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start   # Windows
 ```
 
 启动后打开 <http://127.0.0.1:13343/>。
@@ -95,20 +106,27 @@ powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start
 3. **实时跟踪** → 运行详情页看 agent 思考流、工具调用、攻击图；扫到一半可 **⏸ 暂停**，之后 **▶ 继续**
 4. **导出报告** → 目标卡「导出报告」一键打包该项目全部漏洞（Markdown，含 PoC/复现/证据）；运行详情也有单次 Markdown 报告
 
-### 手动启动
+### 手动启动（从源码）
 
 ```bash
-# 1. 构建 Go 平台（server + MCP 工具）
+# 1. 构建前端（仓库已带预构建 dist，改过前端才需要；跳过则直接跑 server）
+cd frontend && npm install && npm run build && cd ..
+
+# 2. 构建 Go 平台（server + MCP 工具）
 go build -o bin/dhunter-server ./cmd/dhunter-server
 go build -o bin/dhunter-mcp    ./cmd/dhunter-mcp
 
-# 2. 启动 Python agent（黑板引擎）
+# 3. 启动 Python agent（黑板引擎）
 cd agents
 pip install -r requirements.txt
 python -m core.server          # 127.0.0.1:9100
+cd ..
 
-# 3. 启动 server
-./bin/dhunter-server --config configs/dhunter.yaml
+# 4. 启动 server（自动 serve 前端 dist）
+./bin/dhunter-server --config configs/dhunter.yaml   # 127.0.0.1:13343
+
+# 5. （可选）外部扫描器
+./scripts/setup-tools.sh
 ```
 
 ## 🧰 外部工具依赖（可选）
