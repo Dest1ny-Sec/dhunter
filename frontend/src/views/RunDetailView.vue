@@ -1,12 +1,33 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Marked } from 'marked'
-import hljs from 'highlight.js'
+// highlight.js core + a small language set keeps the 1.3MB RunDetail bundle
+// lean — full hljs ships ~30 languages the report never uses.
+import hljs from 'highlight.js/lib/core'
 import 'highlight.js/styles/github-dark.css'
+import bash from 'highlight.js/lib/languages/bash'
+import json from 'highlight.js/lib/languages/json'
+import http from 'highlight.js/lib/languages/http'
+import javascript from 'highlight.js/lib/languages/javascript'
+import xml from 'highlight.js/lib/languages/xml'
+import sql from 'highlight.js/lib/languages/sql'
+import markdown from 'highlight.js/lib/languages/markdown'
+import ini from 'highlight.js/lib/languages/ini'
+import plaintext from 'highlight.js/lib/languages/plaintext'
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('http', http)
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('markdown', markdown)
+hljs.registerLanguage('ini', ini)
+hljs.registerLanguage('plaintext', plaintext)
 import EventStream, { type SSEEvent } from '../components/EventStream.vue'
 import SeverityBadge from '../components/SeverityBadge.vue'
-import BoardView from '../components/BoardView.vue'
+// Vue Flow 攻击图只在「攻击图」tab 打开时才加载（懒加载，避免拖慢首屏）
+const BoardView = defineAsyncComponent(() => import('../components/BoardView.vue'))
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiProgress from '../components/ui/UiProgress.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
