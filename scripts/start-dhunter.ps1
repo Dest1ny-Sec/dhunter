@@ -6,6 +6,9 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repo root
 Set-Location $Root
 
+# 内置扫描器目录 (setup-tools.ps1 安装的 subfinder/httpx/katana... + 随仓库 exe)
+$env:PATH = (Join-Path $Root "tools\bin") + ";" + $env:PATH
+
 $PlatPort = 13343
 $AgentPort = 9100
 $McpPort = 9124

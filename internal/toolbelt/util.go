@@ -12,9 +12,11 @@ package toolbelt
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -156,6 +158,12 @@ func safeExec(ctx context.Context, timeout time.Duration, name string, args ...s
 		return "", err
 	}
 	if err := cmd.Start(); err != nil {
+		// Graceful degradation: a missing scanner must not break the whole
+		// run. Tell the agent the tool isn't installed and to fall back.
+		var ee *exec.Error
+		if errors.As(err, &ee) && (errors.Is(ee.Err, exec.ErrNotFound) || errors.Is(ee.Err, os.ErrNotExist)) {
+			return "", fmt.Errorf("[工具 %s 未安装] 已跳过。可运行 scripts/setup-tools.sh / setup-tools.ps1 安装，或改用替代方法（http_request/爬虫/JS分析等）", name)
+		}
 		return "", err
 	}
 

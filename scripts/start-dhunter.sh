@@ -7,6 +7,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# 内置扫描器目录 (setup-tools.sh 安装的 subfinder/httpx/katana... + 随仓库 exe)
+export PATH="$ROOT/tools/bin:$PATH"
+
 PLAT_BIN="/tmp/dhunter-server"
 MCP_BIN="/tmp/dhunter-mcp"
 AGENT_DIR="$ROOT/agents"

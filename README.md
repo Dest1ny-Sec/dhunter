@@ -111,6 +111,35 @@ python -m core.server          # 127.0.0.1:9100
 ./bin/dhunter-server --config configs/dhunter.yaml
 ```
 
+## 🧰 外部工具依赖（可选）
+
+Dhunter **核心服务零外部依赖**（Go 单二进制 + 进程内 HTTP）。外部扫描器是**可选的**——未安装时平台会**自动跳过并提示改用替代方法**（graceful degradation），不影响核心漏洞挖掘。
+
+一键安装全部扫描器：
+
+```bash
+# macOS / Linux
+./scripts/setup-tools.sh
+
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\setup-tools.ps1
+```
+
+安装后二进制落在 `tools/bin/`，启动脚本自动加入 PATH。也可手动安装：
+
+| 工具 | 用途 | macOS | Windows |
+|---|---|---|---|
+| `httpx` | 存活 / 指纹 / 技术识别 | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` | 同左（装 Go 后） |
+| `subfinder` | 被动子域枚举 | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` | 同左 |
+| `katana` | 全站爬虫 | `go install github.com/projectdiscovery/katana/cmd/katana@latest` | 同左 |
+| `gau` | 历史 URL | `go install github.com/lc/gau/v2/cmd/gau@latest` | 同左 |
+| `waybackurls` | Wayback URL | `go install github.com/tomnomnom/waybackurls@latest` | 同左 |
+| `assetfinder` | 子域发现 | `go install github.com/tomnomnom/assetfinder@latest` | 同左 |
+| `nmap` | 端口扫描 | `brew install nmap` | [官方安装包](https://nmap.org/download.html) |
+| `arjun` / `uro` | 参数 fuzz / URL 去重 | `pip3 install arjun uro` | `pip install arjun uro` |
+
+> 缺少某个扫描器不会报错——agent 会收到"[工具 xxx 未安装] 已跳过，可改用替代方法"的提示并自动换工具。
+
 ### 配置 LLM
 
 Dhunter 兼容 Anthropic / OpenAI 协议（DeepSeek / MiniMax / Qwen / GLM / Claude…）。在**设置页**填入模型、Base URL、API Key 并测试连接，或在 `configs/dhunter.yaml` 配置：
