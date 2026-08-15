@@ -1,23 +1,6 @@
 <p align="center">
-  <img src="assets/screenshots/dashboard.png" width="100%" alt="Dhunter 主界面：目标、运行记录、漏洞成果一览" />
+  <img src="assets/dhunter-hero.svg" width="100%" alt="Dhunter — AI 驱动的自主渗透测试平台" />
 </p>
-
-<h1 align="center">Dhunter</h1>
-
-<p align="center">
-  <b>AI 驱动的自主渗透测试平台</b><br />
-  输入一个域名或 URL，Dhunter 的 AI 渗透 agent 会自动完成：<b>侦察 → 规划 → 主动测试 → 漏洞验证 → 生成报告</b>。
-</p>
-
-<p align="center">
-  <a href="#-快速开始">🚀 快速开始</a> ·
-  <a href="#-核心特性">✨ 核心特性</a> ·
-  <a href="#-真实效果">📸 真实效果</a> ·
-  <a href="#-架构">🏗 架构</a> ·
-  <a href="#-免责声明">⚠️ 免责声明</a>
-</p>
-
----
 
 > ⚠️ **仅供学术交流与安全研究使用 · 禁止用于任何非法或盈利行为。**
 > 请确保所有测试目标均已获得授权。
@@ -33,6 +16,32 @@
 - 每个结论都要**先验证再上报**——SRC 验收门禁会机械重放你的 PoC，时变噪声会被自动驳回；
 - 最终把确认的漏洞汇总成一份 **Markdown 报告**。
 
+## 📸 真实效果
+
+下面这张攻击链图来自一次真实的授权测试（Typecho 博客靶场）：agent 自主构建了 49 条事实、7 个攻击意图，把 `.git` 暴露、XML-RPC SSRF、install.php 等发现串成完整的攻击链。
+
+<p align="center">
+  <img src="assets/screenshots/attack-graph.png" width="100%" alt="攻击链图 — 一次真实渗透中 agent 自主构建的事实/意图/发现网络" />
+  <em>攻击链图：agent 自主构建的事实 → 意图 → 发现网络，实时可视化</em>
+</p>
+
+平台主界面与核心功能：
+
+<p align="center">
+  <img src="assets/screenshots/dashboard.png" width="49%" alt="仪表盘总览" />
+  <img src="assets/screenshots/vulns.png" width="49%" alt="漏洞成果列表" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/targets.png" width="49%" alt="授权目标管理（含并发设置/导出/删除）" />
+  <img src="assets/screenshots/search.png" width="49%" alt="历史对话全文搜索" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/report.png" width="49%" alt="Markdown 漏洞报告" />
+  <img src="assets/screenshots/settings.png" width="49%" alt="设置：模型/账号/并发/清空数据" />
+</p>
+
 ## ✨ 核心特性
 
 | 特性 | 说明 |
@@ -41,37 +50,14 @@
 | 🔍 **手动化侦察** | 子域枚举、JS 资产与凭据分析、历史 URL、技术指纹，20+ 内置工具随平台启动 |
 | ⚔️ **主动测试** | HTTP 手工探测、参数 fuzz、认证绕过、信息泄露路径、业务逻辑测试，agent 自主选工具 |
 | 🛡️ **SRC 验收门禁** | verifier 对每条漏洞做**机械重放 + 稳定性检查**：同一 PoC 两次结果不一致 = 时变噪声 → 自动驳回，杜绝误报 |
-| ⚡ **实时思考流** | SSE 实时推送 agent 的思考、工具调用、工具结果，整个过程透明可见 |
-| 📊 **攻击链视图** | 以图的形式展示已确认的事实与攻击路径 |
+| 🎯 **漏洞优先验证** | worker 每落地一条漏洞立即触发 verifier 机械重放验证，不用等扫描结束 |
 | 🧵 **每项目并发设置** | 创建目标时可指定并发 worker 数，深挖大目标时加大并发、小目标降速省 token |
 | ⏸️ **运行暂停/恢复** | 随时暂停 run（保留已发现的黑板），之后一键「继续」从断点恢复 |
-| 🎯 **漏洞优先验证** | worker 每落地一条漏洞立即触发 verifier 机械重放验证，不用等扫描结束 |
-| 📦 **项目一键导出** | 目标卡上「导出报告」打包该项目全部漏洞为 Markdown（含 PoC/复现/证据） |
+| 📦 **项目一键导出** | 目标卡上「导出报告」一键打包该项目全部漏洞为 Markdown（含 PoC/复现/证据） |
+| ⚡ **实时思考流** | SSE 实时推送 agent 的思考、工具调用、工具结果，整个过程透明可见 |
 | 📄 **一键报告** | 每次运行导出 Markdown 报告 |
 | 🔐 **首启自动账号** | 首次运行自动生成管理账号（用户名 + 随机密码），横幅展示，之后可在设置页修改 |
 | 💻 **跨平台** | macOS / Linux / Windows 三平台启动脚本，Go 纯静态二进制（无 CGO） |
-
-## 📸 真实效果
-
-<p align="center">
-  <img src="assets/screenshots/attack-graph.png" width="100%" alt="攻击链图 — 一次真实渗透中自动构建的事实/意图/发现网络" />
-  <em>攻击链图：agent 自主构建的事实 → 意图 → 发现网络，实时可视化</em>
-</p>
-
-<p align="center">
-  <img src="assets/screenshots/vulns.png" width="49%" alt="漏洞成果列表" />
-  <img src="assets/screenshots/targets.png" width="49%" alt="授权目标管理" />
-</p>
-
-<p align="center">
-  <img src="assets/screenshots/search.png" width="49%" alt="历史对话全文搜索" />
-  <img src="assets/screenshots/report.png" width="49%" alt="Markdown 漏洞报告" />
-</p>
-
-<p align="center">
-  <img src="assets/screenshots/settings.png" width="49%" alt="设置：模型/账号/并发/清空数据" />
-  <img src="assets/screenshots/dashboard.png" width="49%" alt="仪表盘总览" />
-</p>
 
 ## 🚀 快速开始
 

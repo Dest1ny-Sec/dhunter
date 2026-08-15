@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" role="img" aria-label="Dhunter — AI 驱动的自主渗透测试平台">
+  <title>Dhunter — AI 驱动的自主渗透测试平台</title>
+  <!-- background -->
+  <rect width="1200" height="400" fill="#0B0E14"/>
+
+  <!-- subtle grid (strict technical grid, not wallpaper) -->
+  <g stroke="#1A2130" stroke-width="1">
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="300" x2="1200" y2="300"/>
+    <line x1="400" y1="0" x2="400" y2="400"/>
+    <line x1="800" y1="0" x2="800" y2="400"/>
+  </g>
+
+  <!-- ============ left: identity ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <!-- name -->
+    <text x="64" y="104" fill="#F5F1E8" font-size="76" font-weight="800" letter-spacing="1">Dhunter</text>
+    <!-- promise -->
+    <text x="66" y="150" fill="#C9C5BC" font-size="26" font-weight="600">AI 驱动的自主渗透测试平台</text>
+    <text x="66" y="180" fill="#8A93A6" font-size="18">AI-driven autonomous penetration testing</text>
+  </g>
+
+  <!-- chain motif: 目标 → 侦察 → 攻击 → 验证 → 报告 -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="22" fill="#8A93A6">
+    <text x="66" y="236">目标</text>
+    <text x="130" y="236" fill="#5C6370">→</text>
+    <text x="156" y="236">侦察</text>
+    <text x="220" y="236" fill="#5C6370">→</text>
+    <text x="246" y="236">攻击</text>
+    <text x="310" y="236" fill="#5C6370">→</text>
+    <text x="336" y="236" fill="#7C5CFF" font-weight="700">验证</text>
+    <text x="400" y="236" fill="#5C6370">→</text>
+    <text x="426" y="236">报告</text>
+  </g>
+
+  <!-- first action -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="66" y="282" fill="#8A93A6" font-size="18">输入一个目标，agent 自主完成侦察、规划、</text>
+    <text x="66" y="306" fill="#8A93A6" font-size="18">主动测试、漏洞验证与报告生成。</text>
+  </g>
+
+  <!-- metadata -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#5C6370">
+    <text x="66" y="356">Go · Python · Vue · SQLite</text>
+    <text x="66" y="380">22+ 内置工具 · 黑板引擎 · SRC 验收门禁</text>
+  </g>
+
+  <!-- ============ right: terminal (native material) ============ -->
+  <g>
+    <!-- window -->
+    <rect x="556" y="52" width="588" height="296" rx="10" fill="#10141D" stroke="#3A4150" stroke-width="1.5"/>
+    <!-- title bar -->
+    <circle cx="580" cy="76" r="5" fill="#5C6370"/>
+    <circle cx="602" cy="76" r="5" fill="#5C6370"/>
+    <circle cx="624" cy="76" r="5" fill="#7C5CFF"/>
+    <text x="648" y="82" fill="#5C6370" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">dhunter · autonomous pentest</text>
+    <line x1="556" y1="96" x2="1144" y2="96" stroke="#3A4150" stroke-width="1"/>
+
+    <!-- terminal output -->
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">
+      <text x="576" y="132" fill="#F5F1E8">$ dhunter http://47.116.38.148</text>
+      <text x="576" y="166" fill="#8A93A6">[recon] Typecho 1.0 / PHP 5.5.9</text>
+      <text x="576" y="200" fill="#8A93A6">[+] .git 仓库暴露 · var/usr 目录列表</text>
+      <text x="576" y="234" fill="#8A93A6">[+] XML-RPC pingback → SSRF</text>
+      <text x="576" y="268" fill="#7C5CFF" font-weight="700">[!] 3 条漏洞机械重放验证通过</text>
+      <text x="576" y="302" fill="#F5F1E8">$ <tspan fill="#F5F1E8">█</tspan></text>
+    </g>
+  </g>
+</svg>
