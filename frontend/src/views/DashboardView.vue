@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
+import { estimateCostCNY, fmtCostCNY } from '../utils/cost'
 import StatCard from '../components/ui/StatCard.vue'
 import PanelCard from '../components/ui/PanelCard.vue'
 import DonutChart from '../components/charts/DonutChart.vue'
@@ -17,6 +18,8 @@ const runs = ref<any[]>([])
 const vulns = ref<any[]>([])
 const loading = ref(true)
 const trendRange = ref<'day' | 'week' | 'month'>('week')
+const llmReady = ref(true) // LLM 是否已配置（未配置则顶部横幅提示）
+const llmModel = ref('')
 
 const severityOrder = ['critical', 'high', 'medium', 'low', 'info']
 const severityColors: Record<string, string> = {
@@ -30,6 +33,7 @@ const runningRuns = computed(() => runs.value.filter((r) => r.status === 'runnin
 const confirmedCount = computed(() => vulns.value.filter((v) => v.status === 'confirmed').length)
 const pendingCount = computed(() => vulns.value.filter((v) => v.status === 'pending').length)
 const totalTokens = computed(() => runs.value.reduce((s, r) => s + (r.input_tokens || 0) + (r.output_tokens || 0) + (r.cache_read_input_tokens || 0), 0))
+const totalCost = computed(() => runs.value.reduce((s, r) => s + estimateCostCNY(r, llmModel.value), 0))
 
 const sevCounts = computed(() => {
   const m: Record<string, number> = {}
@@ -100,11 +104,25 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  try {
+    const llmRes = await api.get('/settings/llm')
+    llmModel.value = llmRes.data?.model || ''
+    llmReady.value = !!(llmRes.data?.api_key && llmRes.data?.base_url)
+  } catch {
+    llmReady.value = false
+  }
 })
 </script>
 
 <template>
   <div class="dashboard col">
+    <!-- LLM 未配置引导横幅 -->
+    <div v-if="!llmReady" class="llm-warn card" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-color:var(--warning);margin-bottom:14px">
+      <span>⚠️</span>
+      <span style="flex:1;font-size:13px">还没有配置 AI 模型，创建目标后 run 会失败。请先到 <b>设置 → AI 大模型</b> 填入模型与 API Key。</span>
+      <a href="/settings" style="font-size:13px;color:var(--accent);text-decoration:none">去配置 →</a>
+    </div>
+
     <!-- === HERO ROW: 1 large token card + 3 secondary === -->
     <div class="hero-grid">
       <div class="enter enter-1">
@@ -121,6 +139,10 @@ onMounted(async () => {
           <div class="hero-tokens-value">
             <span class="num">{{ loading ? '—' : fmtN(totalTokens) }}</span>
             <span class="unit">tokens</span>
+          </div>
+          <div class="hero-tokens-cost" v-if="!loading && totalCost > 0">
+            成本 ≈ <b style="color: var(--warning)">{{ fmtCostCNY(totalCost) }}</b>
+            <span style="opacity:.6; font-size:11px">（按常见模型单价估算）</span>
           </div>
           <div class="hero-tokens-bars" v-if="!loading">
             <div class="bar"><span class="bar-label">输入</span><span class="bar-num">{{ fmtN(runs.reduce((s, r) => s + (r.input_tokens || 0), 0)) }}</span></div>

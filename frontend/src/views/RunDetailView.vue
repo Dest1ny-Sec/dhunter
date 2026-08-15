@@ -13,6 +13,7 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import Icon from '../components/icons/Icon.vue'
 import { api } from '../api/client'
+import { estimateCostCNY, fmtCostCNY } from '../utils/cost'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,6 +37,7 @@ const report = ref<string>('')
 const expandedResults = ref<Record<string, boolean>>({})
 const status = ref<string>('pending')
 const error = ref<string | null>(null)
+const llmModel = ref('')
 const sseRef = ref<EventSource | null>(null)
 
 const md = new Marked({ gfm: true, breaks: true })
@@ -83,6 +85,8 @@ const cacheHitRate = computed(() => {
   const total = read + fresh
   return total > 0 ? Math.round((read / total) * 100) : 0
 })
+// 粗略成本估算（按常见模型单价，仅供预算参考）
+const runCost = computed(() => estimateCostCNY(runInfo.value || {}, llmModel.value))
 function fmtN(n?: number): string {
   if (n == null) return '—'
   if (n < 1000) return String(n)
@@ -179,6 +183,10 @@ onMounted(async () => {
   connectSSE()
   loadTools()
   toolTimer = window.setInterval(loadTools, 3000)
+  try {
+    const llmRes = await api.get('/settings/llm')
+    llmModel.value = llmRes.data?.model || ''
+  } catch { /* cost estimate falls back to default price */ }
 })
 onBeforeUnmount(() => {
   if (toolTimer) window.clearInterval(toolTimer)
@@ -219,6 +227,7 @@ watch(runId, async (v) => {
           in {{ fmtN(runInfo?.input_tokens) }} · out {{ fmtN(runInfo?.output_tokens) }}
           · reasoning {{ fmtN(runInfo?.reasoning_tokens) }}
           · 缓存命中 <b style="color: var(--ok)">{{ cacheHitRate }}%</b>
+          · 成本 ≈ <b style="color: var(--warning)">{{ fmtCostCNY(runCost) }}</b>
         </span>
       </div>
       <span class="muted" style="font-size: 12px">{{ events.length }} events</span>

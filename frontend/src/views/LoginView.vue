@@ -106,6 +106,16 @@ async function submit() {
       </div>
 
       <p class="first-run muted">首次运行请查看启动横幅获取默认账号（默认 admin / 随机密码）；已修改过密码请用当前凭据</p>
+
+      <details class="forgot">
+        <summary>忘记密码？</summary>
+        <ol class="muted">
+          <li>查看启动横幅或日志（首次运行会打印一次 <code>password</code>）</li>
+          <li>在 <code>configs/dhunter.yaml</code> 设置 <code>admin.bootstrap_password</code>，重启后用它登录</li>
+          <li>删除数据库 settings 表中的 <code>admin_password_hash</code>，重启会重新随机生成并打印</li>
+        </ol>
+      </details>
+
       <p class="disclaimer">
         <span class="warn-icon" aria-hidden="true">⚠</span>
         仅供学术交流与安全研究使用 · 禁止用于任何非法或盈利行为
@@ -177,4 +187,11 @@ async function submit() {
 @keyframes lf-rise {
   to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
+</style>
+
+<style scoped>
+.forgot { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+.forgot summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+.forgot ol { margin: 6px 0 0 18px; padding: 0; line-height: 1.7; }
+.forgot code { background: var(--bg-elev-2); padding: 0 4px; border-radius: 4px; }
 </style>

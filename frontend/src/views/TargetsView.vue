@@ -19,6 +19,8 @@ const maxWorkers = ref(0)
 const error = ref<string | null>(null)
 const delError = ref<string | null>(null)
 const loading = ref(false)
+const authConfirmed = ref(false)
+const llmReady = ref(true)
 const targets = ref<any[]>([])
 const runs = ref<any[]>([])
 const vulns = ref<any[]>([])
@@ -209,11 +211,19 @@ onMounted(() => {
   loadTargets()
   if (route.query.new === '1') showForm.value = true
   if (typeof route.query.target === 'string' && route.query.target) target.value = route.query.target
+  api.get('/settings/llm').then((r) => {
+    llmReady.value = !!(r.data?.api_key && r.data?.base_url)
+  }).catch(() => { llmReady.value = false })
 })
 </script>
 
 <template>
   <div class="col">
+    <div v-if="!llmReady" class="card" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-color:var(--warning);margin-bottom:14px">
+      <span>⚠️</span>
+      <span style="flex:1;font-size:13px">还没有配置 AI 模型，启动 run 会失败。请先到 <b>设置 → AI 大模型</b> 填入模型与 API Key。</span>
+      <a href="/settings" style="font-size:13px;color:var(--accent);text-decoration:none">去配置 →</a>
+    </div>
     <div class="eng-head">
       <div>
         <h2 style="font-size: 20px; font-weight: 600; margin: 0">授权目标</h2>
@@ -295,8 +305,12 @@ onMounted(() => {
         <Icon name="alert" :size="14" />
         <span>{{ error }}</span>
       </div>
+      <label class="auth-confirm">
+        <input v-model="authConfirmed" type="checkbox" />
+        <span>我确认目标已获得授权，且仅用于学术交流与安全研究</span>
+      </label>
       <div class="row">
-        <UiButton variant="primary" size="lg" :disabled="loading" @click="start">
+        <UiButton variant="primary" size="lg" :disabled="loading || !authConfirmed" @click="start">
           <Icon name="play" :size="14" />
           <span style="margin-left: 6px">{{ loading ? '启动中…' : '启动评估' }}</span>
         </UiButton>
@@ -396,6 +410,12 @@ onMounted(() => {
 }
 .eng-card-foot-actions .danger-text { color: var(--danger); }
 .sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.auth-confirm {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-dim); cursor: pointer;
+  padding: 8px 0 4px;
+}
+.auth-confirm input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
 .form-error {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px;
