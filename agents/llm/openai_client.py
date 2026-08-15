@@ -39,6 +39,63 @@ def _env(name: str, default: str) -> str:
     return val if val not in (None, "") else default
 
 
+def _int(v: Any) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_openai_usage(usage: dict[str, Any]) -> dict[str, int]:
+    """Normalize OpenAI-compatible usage into the canonical token buckets.
+
+    Handles the cache-token shapes different backends report (ported from
+    Hermes' normalize_usage):
+      * OpenAI / Qwen / GLM   -> nested `prompt_tokens_details.cached_tokens`
+      * DeepSeek native API   -> top-level `prompt_cache_hit_tokens` /
+                                 `prompt_cache_miss_tokens`
+      * Anthropic-style via a
+        proxy (OpenRouter etc.) -> top-level `cache_read_input_tokens` /
+                                    `cache_creation_input_tokens`
+    OpenAI-style `prompt_tokens` INCLUDES cached tokens, so plain input is
+    derived by subtracting them out.
+    """
+    details = usage.get("prompt_tokens_details") or {}
+    prompt_total = _int(usage.get("prompt_tokens"))
+    output_total = _int(usage.get("completion_tokens"))
+
+    cache_read = _int(details.get("cached_tokens"))
+    if not cache_read:
+        cache_read = _int(usage.get("cache_read_input_tokens"))
+    if not cache_read:
+        cache_read = _int(usage.get("prompt_cache_hit_tokens"))
+
+    cache_write = _int(details.get("cache_write_tokens"))
+    if not cache_write:
+        cache_write = _int(usage.get("cache_creation_input_tokens"))
+    if not cache_write:
+        # DeepSeek native: miss tokens are the complementary cache write bucket.
+        cache_write = _int(usage.get("prompt_cache_miss_tokens"))
+
+    input_tokens = max(0, prompt_total - cache_read - cache_write)
+
+    # Reasoning / hidden-thinking tokens — dominates output on reasoning
+    # models (deepseek-v4-flash, etc.) and is invisible in completion_tokens.
+    out_details = usage.get("completion_tokens_details") or {}
+    reasoning = _int(out_details.get("reasoning_tokens"))
+    if not reasoning:
+        reasoning = _int(usage.get("reasoning_tokens"))
+
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_total,
+        "cache_creation_input_tokens": cache_write,
+        "cache_read_input_tokens": cache_read,
+        "reasoning_tokens": reasoning,
+        "total": _int(usage.get("total_tokens")) or (input_tokens + output_total),
+    }
+
+
 # Reuse the StreamEvent type from the anthropic client so the agent's
 # event loop doesn't care which protocol produced the stream.
 from llm.anthropic_client import StreamEvent  # noqa: E402
@@ -266,10 +323,5 @@ class OpenAIAdapter:
 
                 yield StreamEvent(type="message_delta", data={"type": "message_delta", "delta": {"stop_reason": _stop_reason(finish_reason), "stop_sequence": None}})
                 yield StreamEvent(type="message_stop", data={"type": "message_stop"})
-                yield StreamEvent(type="usage", data={
-                    "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
-                    "output_tokens": int(usage.get("completion_tokens", 0) or 0),
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 0,
-                    "total": int(usage.get("total_tokens", 0) or 0),
-                })
+                norm = _normalize_openai_usage(usage)
+                yield StreamEvent(type="usage", data=norm)

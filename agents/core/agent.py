@@ -53,6 +53,10 @@ class AgentRun:
     created_at: str = field(default_factory=_now_iso)
     finished_at: str | None = None
     task: asyncio.Task | None = None
+    # Set by the /pause endpoint; the run_manager loop checks it and stops
+    # dispatching without emitting a terminal run_done (the board is kept, so
+    # the run can be resumed via /continue).
+    pause_event: asyncio.Event | None = None
 
     async def emit(self, event: str, data: dict[str, Any]) -> None:
         # Never block the agent on a full queue: if the SSE consumer (the

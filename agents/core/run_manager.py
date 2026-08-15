@@ -22,6 +22,7 @@ from typing import Any
 
 from core.agent import OVERALL_TIMEOUT, AgentRun
 from core.board import BoardClient
+from core.logconfig import clear_run_id, set_run_id
 from core.reason import run_reason_step
 from core.verifier import run_verifier
 from core.worker import run_explore_worker
@@ -40,7 +41,13 @@ MIN_EXPLORED_FACTS = 3
 # Findings wait in "pending" until the verifier re-judges them. We run the
 # verifier periodically DURING the run (not just at convergence) so confirmed
 # / dismissed results surface while the agent is still digging.
-VERIFY_INTERVAL = float(os.environ.get("DHUNTER_VERIFY_INTERVAL", "60"))
+VERIFY_INTERVAL = float(os.environ.get("DHUNTER_VERIFY_INTERVAL", "10"))
+
+# Two-level public suffixes under which the registrable domain is the THIRD
+# label from the right (ecust.edu.cn, qq.com.cn, ...). Without this, a
+# university target would collapse into the shared "edu.cn" bucket and every
+# .edu.cn run would inherit each other's intel.
+_CN_PSL = ("com.cn", "edu.cn", "gov.cn", "org.cn", "net.cn", "ac.cn", "mil.cn")
 
 
 class RunManager:
@@ -57,6 +64,11 @@ class RunManager:
         self.max_run_tokens = 0
         self.llm_config: dict[str, Any] | None = None
         self._last_verify = time.monotonic()
+        # Per-project worker cap (target attributes override the env default).
+        self.max_workers = MAX_WORKERS
+        # Set when the operator pauses the run — the loop stops without
+        # emitting a terminal run_done so the board is preserved for resume.
+        self.paused = False
 
     # --- lifecycle ------------------------------------------------------
 
@@ -64,6 +76,9 @@ class RunManager:
         self.run.status = "running"
         self.run.summary = ""
         self.run.error = None
+        # Tag every log line on this run's task tree with [run_id] so the full
+        # conversation can be replayed from logs/agent.log.
+        set_run_id(self.run.run_id)
         try:
             await asyncio.wait_for(self._loop(), timeout=OVERALL_TIMEOUT)
         except asyncio.TimeoutError:
@@ -92,6 +107,7 @@ class RunManager:
         finally:
             self.run.finished_at = _now_iso()
             self.registry.clear_run_auth(self.run.run_id)
+            clear_run_id()
 
     # --- scheduler ------------------------------------------------------
 
@@ -109,12 +125,18 @@ class RunManager:
             log.warning("run %s: MCP not loaded yet, starting with fallback tools", self.run.run_id)
         converged = False
         while time.monotonic() - self.started < OVERALL_TIMEOUT:
+            # Operator paused this run → stop dispatching, keep the board.
+            if self.run.pause_event is not None and self.run.pause_event.is_set():
+                self.paused = True
+                break
+
             graph = await self.board.graph(self.run.run_id)
             # time-based run limit is the only stop mechanism (see OVERALL_TIMEOUT)
             open_its = [i for i in (graph.get("intents") or []) if i.get("status") == "open"]
 
             # reap finished workers
             done = [t for t in self.workers if t.done()]
+            reaped_any = bool(done)
             for t in done:
                 intent = self.workers.pop(t, None)
                 if intent:
@@ -127,7 +149,7 @@ class RunManager:
                     pass
 
             # dispatch workers for open intents up to the concurrency cap
-            free = MAX_WORKERS - len(self.workers)
+            free = self.max_workers - len(self.workers)
             for intent in open_its:
                 if free <= 0:
                     break
@@ -157,9 +179,10 @@ class RunManager:
             # Retry MCP connection periodically (the sidecar may come up later).
             await self.registry.ensure_mcp()
 
-            # Verify pending findings periodically so confirmed results
-            # surface while the run is still digging.
-            if time.monotonic() - self._last_verify > VERIFY_INTERVAL:
+            # Verify pending findings — promptly when a worker just landed a
+            # finding (出漏洞优先验证), and at least every VERIFY_INTERVAL.
+            due = time.monotonic() - self._last_verify
+            if reaped_any or due > VERIFY_INTERVAL:
                 self._last_verify = time.monotonic()
                 await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
 
@@ -170,6 +193,14 @@ class RunManager:
                     continue  # workers still running; re-check the board
             else:
                 await asyncio.sleep(1.0)
+
+        if self.paused:
+            # Paused by the operator: stop cleanly WITHOUT a terminal run_done.
+            # The Go backend has already set the run status to "paused" and the
+            # board stays intact, so the run can be resumed via /continue.
+            await self._cancel_workers()
+            log.info("run %s paused (board kept, resume via continue)", self.run.run_id)
+            return
 
         if not converged and time.monotonic() - self.started >= OVERALL_TIMEOUT:
             # The loop's own timeout fired (rare — wait_for would usually
@@ -188,6 +219,19 @@ class RunManager:
             if not still:
                 break
             await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
+
+        # Findings still pending after all verifier passes mean the SRC gate
+        # silently missed them (LLM judge call failed, backend PATCH failed,
+        # or a race). Surface it instead of letting it hide.
+        try:
+            left = [v for v in await self.board.list_vulnerabilities(self.run.run_id) if v.get("status") in ("pending", "open")]
+        except Exception:  # noqa: BLE001
+            left = []
+        if left:
+            log.warning(
+                "run %s: %d finding(s) still pending/open after verifier (gate likely missed them): %s",
+                self.run.run_id, len(left), [(v.get("title") or "")[:60] for v in left][:5],
+            )
 
         # Learn reusable intel for future runs on this host family.
         try:
@@ -243,6 +287,8 @@ class RunManager:
         from urllib.parse import urlparse
         host = urlparse(target).hostname or target
         parts = host.split(".")
+        if len(parts) >= 3 and ".".join(parts[-2:]) in _CN_PSL:
+            return ".".join(parts[-3:])
         if len(parts) >= 2:
             return ".".join(parts[-2:])
         return host
@@ -324,6 +370,17 @@ class RunManager:
             if not target_id:
                 return
             target = await self.board.get_target(target_id)
+
+            # Per-project worker cap: target attributes override the env default.
+            try:
+                import json as _j
+                mw = int(_j.loads(target.get("attributes") or "{}").get("max_workers") or 0)
+                if mw > 0:
+                    self.max_workers = min(mw, 16)
+                    log.info("run %s: per-target max_workers=%d", self.run.run_id, self.max_workers)
+            except Exception:  # noqa: BLE001
+                pass
+
             raw = target.get("auth_context") or ""
             if not raw or raw == "{}":
                 return

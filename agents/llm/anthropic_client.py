@@ -52,6 +52,7 @@ class TokenUsage:
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    reasoning_tokens: int = 0
 
     @property
     def total(self) -> int:
@@ -67,6 +68,7 @@ class TokenUsage:
         self.output_tokens += other.output_tokens
         self.cache_creation_input_tokens += other.cache_creation_input_tokens
         self.cache_read_input_tokens += other.cache_read_input_tokens
+        self.reasoning_tokens += other.reasoning_tokens
 
     def to_dict(self) -> dict[str, int]:
         return {
@@ -74,6 +76,7 @@ class TokenUsage:
             "output_tokens": self.output_tokens,
             "cache_creation_input_tokens": self.cache_creation_input_tokens,
             "cache_read_input_tokens": self.cache_read_input_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
             "total": self.total,
         }
 
@@ -170,6 +173,7 @@ async def stream_chat(
                         output_tokens=int(usage_data.get("output_tokens", 0) or 0),
                         cache_creation_input_tokens=int(usage_data.get("cache_creation_input_tokens", 0) or 0),
                         cache_read_input_tokens=int(usage_data.get("cache_read_input_tokens", 0) or 0),
+                        reasoning_tokens=int(usage_data.get("reasoning_tokens", 0) or 0),
                     )
                     usage.add(inc)
                 yield ev

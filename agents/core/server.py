@@ -39,10 +39,9 @@ from core.board import BoardClient  # noqa: E402
 from core.run_manager import RunManager  # noqa: E402
 from tools.registry import ToolRegistry  # noqa: E402
 
-logging.basicConfig(
-    level=os.environ.get("DHUNTER_AGENT_LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
-)
+from core.logconfig import setup_logging  # noqa: E402
+
+log_dir = setup_logging()
 log = logging.getLogger("dhunter.agent")
 
 PROMPT_PATH = _AGENTS_DIR / "prompts" / "system.md"
@@ -135,6 +134,7 @@ async def start_run(body: StartRunBody) -> JSONResponse:
         target=body.target,
         objective=body.objective,
         queue=queue,
+        pause_event=asyncio.Event(),
     )
     RUNS[body.run_id] = run
     QUEUES[body.run_id] = queue
@@ -167,6 +167,19 @@ async def cancel_run(run_id: str) -> dict[str, object]:
         run.task.cancel()
         return {"run_id": run_id, "status": "cancelling"}
     return {"run_id": run_id, "status": run.status}
+
+
+@app.post("/v1/runs/{run_id}/pause")
+async def pause_run(run_id: str) -> dict[str, object]:
+    """Pause a running run: signal the run_manager loop to stop dispatching
+    without a terminal run_done. The board is kept, so the run can be resumed
+    via POST /api/runs/:id/continue (a fresh loop over the same board)."""
+    run = RUNS.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if run.pause_event is not None:
+        run.pause_event.set()
+    return {"run_id": run_id, "status": "pausing"}
 
 
 @app.get("/v1/runs/{run_id}")

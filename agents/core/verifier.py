@@ -16,8 +16,10 @@ Disabled entirely with DHUNTER_VERIFY=0.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import re
 from typing import Any
 
 from core.agent import AgentRun, call_llm_text, parse_json_object
@@ -43,6 +45,11 @@ _REJECT_HINTS = (
     "plain http", "version disclosure", "version leak", "server version",
     "source map", "sourcemap", "self-xss", "open redirect", "rate limit",
     "rate limiting", "directory listing", "directory index", "favicon",
+    # Account / username enumeration: a bare existence oracle is only
+    # reportable when chained to an exploit (brute-force, lockout bypass).
+    # A naked "isNeed:true means the account exists" leak is noise on its own.
+    "user enumeration", "account enumeration", "username enumeration",
+    "账号枚举", "用户枚举", "用户名枚举",
 )
 # If a title matches a reject hint AND the evidence shows no actual exploit
 # (no data pulled, no bypass, no execution), it's noise.
@@ -52,6 +59,25 @@ _EXPLOIT_MARKERS = (
     "other user", "admin", "200 ok with", "returned the", "leaked the",
     "contains the", "disclosed the",
 )
+# Markers that must match as WHOLE WORDS. A bare substring fires on unrelated
+# words: "admin" inside "sysadmin" / "netadmin" / "hradmin" is just an account
+# name in enumeration evidence — not proof of privileged access.
+_WORD_BOUNDARY_MARKERS = {"admin"}
+
+
+def _has_exploit_marker(title: str, evidence: str) -> bool:
+    """True when the finding's text carries an exploit marker. "admin" is
+    matched as a whole word so probing 'sysadmin'/'netadmin' usernames never
+    counts as evidence of admin access; the rest stay substring matches
+    ("another user" still fires "other user", etc.)."""
+    text = f"{title}\n{evidence}".lower()
+    for m in _EXPLOIT_MARKERS:
+        if m in _WORD_BOUNDARY_MARKERS:
+            if re.search(rf"\b{re.escape(m)}\b", text):
+                return True
+        elif m in text:
+            return True
+    return False
 
 VERIFY_PROMPT = """# Task
 You are the SRC (bug bounty) triage reviewer for a penetration testing platform.
@@ -98,10 +124,13 @@ Target: {target}
 ## Reproduction steps (what the worker claims reproduces it)
 {reproduction}
 
-## Mechanical replay (platform actually re-requested the endpoint)
+## Mechanical replay (platform re-ran the finding's OWN PoC requests)
 {replay_note}
 If the replay shows the endpoint is DOWN (connection failed), the finding is likely
-stale — dismiss. If it returns a status, weigh it against the claimed impact.
+stale — dismiss. A replay marked "不稳定/unstable" means the exact same request
+returned DIFFERENT results on repeated runs — that signal is time-varying noise;
+dismiss unless the variation is clearly endpoint-inherent and unrelated to the
+finding. A stable replay should be weighed normally against the claimed impact.
 
 A finding is only confirmable if it comes with reproducible steps that
 demonstrate the impact (a numbered curl + the expected result). A finding with
@@ -149,30 +178,149 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, ll
         log.info("verifier: run %s -> %s confirmed, %s dismissed", run.run_id, confirmed, dismissed)
 
 
-async def _replay(v: dict[str, Any]) -> dict[str, Any]:
-    """Mechanically re-request the finding's target to verify it is still
-    reachable and returns a plausible status. This grounds the LLM judgment
-    in reality instead of trusting the worker's text alone."""
-    import re as _re
-    import httpx as _httpx
-    url = (v.get("target") or "").strip()
-    method = "GET"
-    # try to extract method + URL from a curl line in the reproduction
-    repro = (v.get("reproduction") or "") + "\n" + (v.get("evidence") or "")
-    for m in _re.finditer(r"curl(?: -X)?\s+(?:\S+\s+)*(?:'(https?://[^' ]+)'|\"(https?://[^\" ]+)\")", repro):
+# --- mechanical replay: reproduce the ORACLE, not just the endpoint --------
+#
+# The old replay did a single GET of the target URL and called it grounding.
+# That only detects "endpoint is down"; a false oracle (an isNeed flag that
+# flips between requests) sails through. The new replay re-runs the finding's
+# OWN PoC curl commands several times and flags any request that returns a
+# different (status, body) across identical runs — the exact signature of a
+# time-varying signal misread as a differential.
+
+_REPLAY_PASSES = int(os.environ.get("DHUNTER_VERIFY_REPLAY_PASSES", "3"))
+_REPLAY_MAX_REQS = int(os.environ.get("DHUNTER_VERIFY_MAX_REQS", "5"))
+_REPLAY_INTERVAL = float(os.environ.get("DHUNTER_VERIFY_REPLAY_INTERVAL", "0.5"))
+
+# Terms marking a finding as "oracle-style": its proof IS a differential
+# between inputs. For these, a non-reproducible replay is fatal (auto-dismiss).
+_ORACLE_HINTS = (
+    "oracle", "boolean", "blind", "bool", "differential", "enumeration", "enum",
+    "枚举", "布尔", "盲注", "翻转", "isneed", "exists",
+)
+
+
+def _parse_curl_requests(text: str) -> list[dict[str, Any]]:
+    """Extract (method, url, headers, body) from the curl commands in a
+    finding's reproduction/evidence. Handles single-line curls of the form:
+    `curl [-i] [-X METHOD] 'URL' [-H 'H'] [--data 'body']`, including
+    backslash-continued multi-line commands."""
+    reqs: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    # Join backslash-continued lines so a multi-line curl parses as one command.
+    cmds: list[str] = []
+    buf = ""
+    for raw in (text or "").splitlines():
+        ln = raw.strip()
+        if not ln or ln.startswith("#"):
+            if buf:
+                cmds.append(buf)
+                buf = ""
+            continue
+        buf = f"{buf} {ln}"
+        if not ln.endswith("\\"):
+            cmds.append(buf)
+            buf = ""
+    if buf:
+        cmds.append(buf)
+
+    for cmd in cmds:
+        if "curl" not in cmd:
+            continue
+        m = re.search(r"(?:'([^']*https?://[^']*)'|\"([^\"]*https?://[^\"]*)\")", cmd)
+        if not m:
+            continue
         url = m.group(1) or m.group(2)
-        break
-    m = _re.search(r"curl(?: -X)?\s+([A-Z]+)\s", repro)
-    if m and m.group(1) in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
-        method = m.group(1)
-    if not url.startswith("http"):
-        return {"ok": False, "error": "no url to replay"}
+        m2 = re.search(r"-(?:X|request)\s+([A-Z]+)", cmd)
+        method = (m2.group(1) if m2 else "GET").upper()
+        if method == "GET" and re.search(r"(?:--data(?:-binary|-raw)?|--json|-d)\b", cmd):
+            method = "POST"
+        headers: dict[str, str] = {}
+        for hm in re.finditer(r"-H\s+(?:'([^']*)'|\"([^\"]*)\")", cmd):
+            hv = (hm.group(1) or hm.group(2) or "").strip()
+            if ":" in hv:
+                k, _, v = hv.partition(":")
+                headers[k.strip()] = v.strip()
+        body = None
+        for bm in re.finditer(
+            r"(?:--data-binary|--data-raw|--data|--json|-d)\s+(?:'([^']*)'|\"([^\"]*)\"|(\S+))", cmd
+        ):
+            body = bm.group(1) or bm.group(2) or bm.group(3)
+            break
+        key = (method, url, tuple(sorted(headers.items())), body)
+        if key in seen:
+            continue
+        seen.add(key)
+        reqs.append({"method": method, "url": url, "headers": headers, "body": body})
+    return reqs
+
+
+def _is_oracle_finding(title: str, evidence: str) -> bool:
+    low = f"{title}\n{evidence}".lower()
+    return any(h in low for h in _ORACLE_HINTS)
+
+
+def _stable_replay_note(replay: dict[str, Any]) -> str:
+    lines = [f"机械重放({_REPLAY_PASSES} 次, 同请求结果一致/稳定):"]
+    for r in replay.get("requests") or []:
+        statuses = ", ".join(f"HTTP {s}" for s, _ in r.get("hits", []))
+        lines.append(f"- {r['method']} {r['url']} -> {statuses}")
+    return "\n".join(lines)
+
+
+def _unstable_replay_note(replay: dict[str, Any]) -> str:
+    lines = [f"⚠️ 机械重放不稳定({_REPLAY_PASSES} 次, 同一请求结果不一致):"]
+    for r in replay.get("requests") or []:
+        seen = sorted({s for s, _ in r.get("hits", [])})
+        lines.append(f"- {r['method']} {r['url']} -> {seen}")
+    lines.append(
+        "同一请求多次返回不同结果, finding 依赖的信号可能只是时变噪声; "
+        "除非证据明确解释该变化是端点固有行为且与漏洞无关, 否则应驳回。"
+    )
+    return "\n".join(lines)
+
+
+async def _replay(v: dict[str, Any]) -> dict[str, Any]:
+    """Mechanically re-run the finding's PoC requests and check the oracle
+    actually reproduces. Each distinct curl in reproduction/evidence is fired
+    `_REPLAY_PASSES` times; if the same request yields different (status, body)
+    across passes, the signal is unstable -> the finding does not reproduce."""
+    import httpx as _httpx
+
+    text = (v.get("reproduction") or "") + "\n" + (v.get("evidence") or "")
+    reqs = _parse_curl_requests(text)
+    if not reqs:
+        url = (v.get("target") or "").strip()
+        if not url.startswith("http"):
+            return {"ok": False, "error": "no url to replay"}
+        reqs = [{"method": "GET", "url": url, "headers": {}, "body": None}]
+    reqs = reqs[:_REPLAY_MAX_REQS]
+
+    outcomes: list[dict[str, Any]] = []
+    stable = True
     try:
         async with _httpx.AsyncClient(timeout=10.0, trust_env=False, follow_redirects=True) as client:
-            resp = await client.request(method, url)
-        return {"ok": True, "status": resp.status_code, "url": url, "method": method}
+            for r in reqs:
+                hits: list[tuple[int, str]] = []
+                for _ in range(_REPLAY_PASSES):
+                    resp = await client.request(r["method"], r["url"], headers=r["headers"], content=r["body"])
+                    hits.append((resp.status_code, resp.text))
+                    await asyncio.sleep(_REPLAY_INTERVAL)
+                if len(set(hits)) > 1:
+                    stable = False
+                outcomes.append({"method": r["method"], "url": r["url"], "hits": hits})
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    first = outcomes[0]
+    return {
+        "ok": True,
+        "status": first["hits"][0][0],
+        "url": first["url"],
+        "method": first["method"],
+        "stable": stable,
+        "requests": outcomes,
+    }
 
 
 async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_config: dict[str, Any] | None = None) -> tuple[bool, str, str]:
@@ -183,17 +331,24 @@ async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_confi
     # Hard pre-filter: obvious config noise with no exploit marker.
     low = title.lower()
     is_noise = any(h in low for h in _REJECT_HINTS)
-    has_exploit = any(m in evidence.lower() or m in low for m in _EXPLOIT_MARKERS)
+    has_exploit = _has_exploit_marker(title, evidence)
     if is_noise and not has_exploit:
         return False, "config noise / phenomenon, no demonstrated exploit", "low"
 
-    # Mechanical replay: re-request the endpoint to ground the judgment.
+    # Mechanical replay: re-run the finding's own PoC requests and check the
+    # oracle is stable. The judge must not trust the worker's text alone — a
+    # differential that flips between two identical requests is noise.
     replay = await _replay(v)
-    replay_note = ""
-    if replay.get("ok"):
-        replay_note = f"机械重放: {replay.get('method')} {replay.get('url')} -> HTTP {replay.get('status')}"
+    if not replay.get("ok"):
+        return False, f"机械重放失败: {replay.get('error', '')}", "info"
+    if replay.get("stable") is False:
+        if _is_oracle_finding(title, evidence):
+            # An oracle finding whose signal does not reproduce is dead on
+            # arrival — dismiss without spending an LLM judgment call.
+            return False, "机械重放不稳定: 同一请求多次结果不一致, finding 依赖的 oracle 不可复现, 已自动驳回", "info"
+        replay_note = _unstable_replay_note(replay)
     else:
-        replay_note = f"机械重放失败: {replay.get('error', '')}"
+        replay_note = _stable_replay_note(replay)
     user_content = VERIFY_PROMPT.format(
         title=title[:300],
         severity=(v.get("severity") or "info"),

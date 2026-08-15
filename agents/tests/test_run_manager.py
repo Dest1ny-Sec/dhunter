@@ -184,3 +184,22 @@ def test_parallel_workers_claim_distinct_intents():
     assert len(concluded) == 2
     workers = {i["worker"] for i in concluded}
     assert len(workers) == 2, f"expected 2 distinct workers, got {workers}"
+
+
+def test_host_family_keeps_cn_university_registrable_domain():
+    """Chinese universities live under the 'edu.cn' public suffix, so the
+    registrable domain is the THIRD label (ecust.edu.cn), not the shared
+    'edu.cn' bucket. Otherwise every .edu.cn target would reuse each other's
+    cross-target knowledge."""
+    cases = {
+        "ecust.edu.cn": "ecust.edu.cn",
+        "https://sso.ecust.edu.cn": "ecust.edu.cn",
+        "https://stu.mail.ecust.edu.cn": "ecust.edu.cn",
+        "https://example.com.cn": "example.com.cn",
+        "https://kolors.kuaishou.com": "kuaishou.com",
+        "https://example.com": "example.com",
+    }
+    for target, expected in cases.items():
+        run = _make_run(target=target)
+        mgr = RunManager(run, FakeBoard(), ToolRegistry(), system_prompt="sys")
+        assert mgr._host_family() == expected, f"{target} -> {mgr._host_family()}, want {expected}"
