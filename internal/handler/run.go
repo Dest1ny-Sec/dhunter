@@ -114,6 +114,36 @@ func (h *RunHandler) Cancel(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "run_id": runID})
 }
 
+// Pause handles POST /api/runs/:id/pause. It asks the Python sidecar to stop
+// the agent loop WITHOUT a terminal status (board kept), and marks the run
+// "paused" in the store so the UI shows the right state. Resume is just
+// POST /api/runs/:id/continue.
+func (h *RunHandler) Pause(c *gin.Context) {
+	runID := c.Param("id")
+	run, err := h.Stores.Runs.Get(c.Request.Context(), runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if run.Status != "running" {
+		c.JSON(http.StatusConflict, gin.H{"error": "run is not running"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := h.Bridge.PauseRun(ctx, runID); err != nil {
+		// Sidecar unreachable — mark paused locally so the UI isn't stuck.
+		log.Printf("dhunter: pause run %s: sidecar error: %v", runID, err)
+	}
+	_ = h.Stores.Runs.Update(context.Background(), &store.Run{ID: runID, Status: "paused"})
+	c.JSON(http.StatusAccepted, gin.H{"ok": true, "run_id": runID, "status": "paused"})
+}
+
 // Continue handles POST /api/runs/:id/continue — resumes a finished run
 // from its durable board. The Python agent starts a FRESH agent loop that
 // re-reads the existing facts/intents (the board IS the session memory), so

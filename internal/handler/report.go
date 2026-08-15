@@ -46,6 +46,106 @@ func (h *ReportHandler) Markdown(c *gin.Context) {
 	c.String(http.StatusOK, md)
 }
 
+// ProjectReport handles GET /api/targets/:id/report — a single Markdown
+// "package" of every vulnerability discovered across all runs of a project
+// (target), grouped by run. Served as a downloadable file.
+func (h *ReportHandler) ProjectReport(c *gin.Context) {
+	id := c.Param("id")
+	ctx := c.Request.Context()
+
+	target, err := h.Stores.Targets.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	runs, err := h.Stores.Runs.ListByTarget(ctx, id, 500)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	vulns, err := h.Stores.Vulns.ListAll(ctx, "", id, "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var b strings.Builder
+	name := target.Name
+	if name == "" {
+		name = target.Value
+	}
+	fmt.Fprintf(&b, "# 项目漏洞报告 — %s\n\n", name)
+	fmt.Fprintf(&b, "- **目标**: %s (`%s`)\n", target.Value, target.Type)
+	fmt.Fprintf(&b, "- **运行次数**: %d\n", len(runs))
+	fmt.Fprintf(&b, "- **漏洞总数**: %d\n", len(vulns))
+	fmt.Fprintf(&b, "- **导出时间**: %s\n\n", time.Now().UTC().Format(time.RFC3339))
+
+	// Status summary.
+	byStatus := map[string]int{}
+	for _, v := range vulns {
+		byStatus[v.Status]++
+	}
+	fmt.Fprintf(&b, "## 漏洞状态汇总\n\n")
+	for _, s := range []string{"confirmed", "pending", "open", "dismissed"} {
+		if n := byStatus[s]; n > 0 {
+			fmt.Fprintf(&b, "- **%s**: %d\n", s, n)
+		}
+	}
+
+	// Group vulns by run.
+	byRun := map[string][]*store.Vulnerability{}
+	for _, v := range vulns {
+		byRun[v.RunID] = append(byRun[v.RunID], v)
+	}
+	sevOrder := []string{"critical", "high", "medium", "low", "info"}
+
+	fmt.Fprintf(&b, "\n## 全部漏洞\n\n")
+	if len(vulns) == 0 {
+		fmt.Fprintf(&b, "_该项目暂无漏洞记录。_\n")
+	} else {
+		idx := 0
+		for _, run := range runs {
+			rv := byRun[run.ID]
+			if len(rv) == 0 {
+				continue
+			}
+			idx++
+			fmt.Fprintf(&b, "### %d. 运行 `%s`（%s，%d 条漏洞）\n\n", idx, run.ID[:8], run.Status, len(rv))
+			for _, sev := range sevOrder {
+				for _, v := range rv {
+					if strings.ToLower(v.Severity) != sev {
+						continue
+					}
+					fmt.Fprintf(&b, "#### [%s] %s\n\n", strings.ToUpper(v.Severity), v.Title)
+					if v.Target != "" {
+						fmt.Fprintf(&b, "- **影响目标**: %s\n", v.Target)
+					}
+					if v.Status != "" {
+						fmt.Fprintf(&b, "- **状态**: %s\n", v.Status)
+					}
+					if v.Evidence != "" {
+						fmt.Fprintf(&b, "- **证据**:\n\n```\n%s\n```\n", v.Evidence)
+					}
+					if v.Reproduction != "" {
+						fmt.Fprintf(&b, "- **复现步骤**:\n\n```\n%s\n```\n", v.Reproduction)
+					}
+					fmt.Fprintf(&b, "\n")
+				}
+			}
+		}
+	}
+
+	md := b.String()
+	escaped := strings.ReplaceAll(name, `"`, `"`)
+	c.Header("Content-Type", "text/markdown; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="dhunter-export-%s.md"`, escaped))
+	c.String(http.StatusOK, md)
+}
+
 // buildMarkdown assembles the Markdown report for a run.
 func (h *ReportHandler) buildMarkdown(c *gin.Context, runID string) (string, error) {
 	ctx := c.Request.Context()

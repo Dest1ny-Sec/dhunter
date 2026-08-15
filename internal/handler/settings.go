@@ -284,3 +284,15 @@ func truncate(b []byte, n int) string {
 	}
 	return s
 }
+
+// ClearData handles POST /api/settings/clear-data — wipes all test/scan data
+// (targets, runs, messages, vulns, board, knowledge) while preserving
+// settings (admin credentials, LLM config, budget). Intended for cleaning a
+// demo/scratch instance before a fresh run or a public demo.
+func (h *SettingsHandler) ClearData(c *gin.Context) {
+	if err := h.Stores.ClearAllData(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}

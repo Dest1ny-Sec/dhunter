@@ -49,6 +49,20 @@ var migrations = []string{
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_messages_run ON messages(run_id);`,
 
+	// messages_fts — full-text search over message content (trigram tokenizer
+	// gives CJK + substring search). message_id is UNINDEXED and holds the
+	// owning messages.id so hits can join back for context.
+	`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+		message_id UNINDEXED,
+		content,
+		tokenize = 'trigram'
+	);`,
+	// Backfill existing messages once (guarded: only when the FTS table is
+	// empty). New inserts keep it in sync via MessageStore.Append.
+	`INSERT INTO messages_fts (message_id, content)
+	 SELECT id, content FROM messages
+	 WHERE NOT EXISTS (SELECT 1 FROM messages_fts LIMIT 1);`,
+
 	// vulnerabilities — confirmed issues, joined back to run + target
 	`CREATE TABLE IF NOT EXISTS vulnerabilities (
 		id              TEXT PRIMARY KEY,
@@ -168,6 +182,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"runs", "output_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"runs", "cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"runs", "cache_read_input_tokens INTEGER NOT NULL DEFAULT 0"},
+		{"runs", "reasoning_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"vulnerabilities", "norm_title TEXT NOT NULL DEFAULT ''"},
 		{"vulnerabilities", "reproduction TEXT NOT NULL DEFAULT ''"},
 		{"targets", "auth_context TEXT NOT NULL DEFAULT ''"},

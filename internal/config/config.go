@@ -68,9 +68,12 @@ type StorageConfig struct {
 }
 
 // AdminConfig controls first-run admin bootstrap and the bearer token used
-// by the API middleware.
+// by the API middleware. Username defaults to "admin" and is auto-generated
+// (together with a random password) on first run — the user can change both
+// later from the Settings page.
 type AdminConfig struct {
 	BootstrapPassword string `yaml:"bootstrap_password"`
+	Username          string `yaml:"username"`
 	Token             string `yaml:"token"`
 }
 
@@ -104,6 +107,7 @@ func Default() *Config {
 		},
 		Admin: AdminConfig{
 			BootstrapPassword: "",
+			Username:          "admin",
 			Token:             "dhunter-admin-please-change-me",
 		},
 	}
@@ -118,17 +122,28 @@ func Load(path string) (*Config, error) {
 		path = "./configs/dhunter.yaml"
 	}
 
+	// Anchor for relative storage paths: the directory containing the config
+	// file, so `sqlite_path: ../data/dhunter.db` resolves the same way no
+	// matter where the server was started from. This fixes both the old
+	// "DB path drift" (relative path resolved against a moving cwd) and the
+	// hardcoded macOS path in the shipped config. Stays empty when no config
+	// file exists — then relative paths fall back to cwd (legacy behavior).
+	anchorDir := ""
+
 	if data, err := os.ReadFile(path); err == nil {
 		// We unmarshal into cfg so missing keys keep their defaults.
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parse config %s: %w", path, err)
+		}
+		if absDir, aerr := filepath.Abs(filepath.Dir(path)); aerr == nil {
+			anchorDir = absDir
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	applyEnvOverrides(cfg)
-	cfg.normalize()
+	cfg.normalize(anchorDir)
 	return cfg, nil
 }
 
@@ -158,8 +173,10 @@ func applyEnvOverrides(cfg *Config) {
 }
 
 // normalize fills in any zero-valued fields the YAML forgot and resolves
-// the SQLite path to an absolute path anchored at the project root.
-func (c *Config) normalize() {
+// the SQLite path to an absolute path. A relative sqlite_path is anchored to
+// the config file's directory (anchorDir); with no config file it falls back
+// to the process cwd (legacy behavior).
+func (c *Config) normalize(anchorDir string) {
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
 	}
@@ -184,8 +201,13 @@ func (c *Config) normalize() {
 	if c.Admin.Token == "" {
 		c.Admin.Token = "dhunter-admin-please-change-me"
 	}
+	if c.Admin.Username == "" {
+		c.Admin.Username = "admin"
+	}
 	if !filepath.IsAbs(c.Storage.SQLitePath) {
-		if abs, err := filepath.Abs(c.Storage.SQLitePath); err == nil {
+		if anchorDir != "" {
+			c.Storage.SQLitePath = filepath.Join(anchorDir, c.Storage.SQLitePath)
+		} else if abs, err := filepath.Abs(c.Storage.SQLitePath); err == nil {
 			c.Storage.SQLitePath = abs
 		}
 	}

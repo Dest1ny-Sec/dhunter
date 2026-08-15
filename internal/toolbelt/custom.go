@@ -120,7 +120,7 @@ func callCustomTool(ctx context.Context, name string, args map[string]interface{
 		if timeout <= 0 {
 			timeout = 120 * time.Second
 		}
-		out, err := safeExec(ctx, timeout, "sh", "-c", cmd)
+		out, err := safeExec(ctx, timeout, shellForOS(), shellFlagForOS(), cmd)
 		if err != nil {
 			return errResult(fmt.Sprintf("%s: %s\n%s", name, err, out))
 		}

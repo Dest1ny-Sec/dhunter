@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -119,6 +120,24 @@ func absInt(x int) int {
 }
 
 // --- subprocess helper -------------------------------------------------
+
+// shellForOS / shellFlagForOS return the command interpreter used to run
+// custom-tool command templates. POSIX shells don't exist on Windows, so we
+// fall back to cmd /C there; everything else uses sh -c. Custom commands are
+// simple "{placeholder} -flags value" templates, so cmd /C handles them fine.
+func shellForOS() string {
+	if runtime.GOOS == "windows" {
+		return "cmd"
+	}
+	return "sh"
+}
+
+func shellFlagForOS() string {
+	if runtime.GOOS == "windows" {
+		return "/C"
+	}
+	return "-c"
+}
 
 // safeExec runs an external binary with a hard timeout and capped output.
 // It's the only way tools talk to on-disk scanners, so it must never leak

@@ -19,8 +19,12 @@ llm:
   max_tokens: 32768
 
 storage:
-  sqlite_path: "/Users/destiny/Downloads/dhunter/data/dhunter.db"
+  # Relative to this file's directory (configs/), so it resolves to
+  # <project-root>/data/dhunter.db on any OS. Override with DHUNTER_SQLITE_PATH.
+  sqlite_path: "../data/dhunter.db"
 
 admin:
+  username: "admin"
+  # 首次启动的初始密码（会持久化，之后可在设置页修改）。留空则随机生成并在横幅展示。
   bootstrap_password: ""
   token: "dhunter-admin-please-change-me"

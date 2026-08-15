@@ -71,6 +71,7 @@ type Event struct {
 	OutputTokens             int `json:"output_tokens,omitempty"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
 	Payload                  json.RawMessage `json:"payload,omitempty"`
 }
 
@@ -144,6 +145,27 @@ func (b *Bridge) CancelRun(ctx context.Context, runID string) error {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("cancel run: status=%d", resp.StatusCode)
+	}
+	return nil
+}
+
+// PauseRun asks the Python sidecar to pause a running run: the agent loop
+// stops dispatching without a terminal run_done, keeping the board so the run
+// can be resumed via Continue.
+func (b *Bridge) PauseRun(ctx context.Context, runID string) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		b.baseURL+"/v1/runs/"+runID+"/pause", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := b.hc.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("pause run: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("pause run: status=%d", resp.StatusCode)
 	}
 	return nil
 }
@@ -357,6 +379,7 @@ func mapPayloadToEvent(name, runID string, p map[string]interface{}) *Event {
 		ev.OutputTokens = int(getNum("output_tokens"))
 		ev.CacheCreationInputTokens = int(getNum("cache_creation_input_tokens"))
 		ev.CacheReadInputTokens = int(getNum("cache_read_input_tokens"))
+		ev.ReasoningTokens = int(getNum("reasoning_tokens"))
 	default:
 		// Unknown event: keep the raw payload so the UI can still
 		// render it; mark it as system so it doesn't pollute the
@@ -406,18 +429,11 @@ func (b *Bridge) handle(ctx context.Context, ev *Event, rawJSON []byte) {
 			CreatedAt: time.Now().UTC(),
 		})
 	case EventToolResult:
-		// The result row piggybacks on the latest tool_call with the
-		// same name; for MVP we just append a separate record so the
-		// report handler can render it. The Python sidecar may send
-		// tool_call and tool_result as separate events.
-		_ = b.stores.ToolCalls.Append(ctx, &store.ToolCall{
-			RunID:      ev.RunID,
-			Name:       ev.Name,
-			Result:     ev.Result,
-			IsError:    ev.IsError,
-			DurationMs: ev.Duration,
-			CreatedAt:  time.Now().UTC(),
-		})
+		// Merge the result into the latest open tool_call row for the same
+		// run+name, so one logical invocation = one row (args + result).
+		// Falls back to a standalone row if no matching open call exists.
+		_ = b.stores.ToolCalls.AppendResult(ctx, ev.RunID, ev.Name,
+			ev.Result, ev.IsError, ev.Duration)
 	case EventVulnerability:
 		_ = b.persistVuln(ctx, ev)
 	case EventTokenUsage:
@@ -427,7 +443,7 @@ func (b *Bridge) handle(ctx context.Context, ev *Event, rawJSON []byte) {
 			RunID:     ev.RunID,
 			Role:      "system",
 			EventType: EventTokenUsage,
-			Content:   fmt.Sprintf("tokens in=%d out=%d cache_create=%d cache_read=%d", ev.InputTokens, ev.OutputTokens, ev.CacheCreationInputTokens, ev.CacheReadInputTokens),
+			Content:   fmt.Sprintf("tokens in=%d out=%d reasoning=%d cache_create=%d cache_read=%d", ev.InputTokens, ev.OutputTokens, ev.ReasoningTokens, ev.CacheCreationInputTokens, ev.CacheReadInputTokens),
 			Payload:   coalesceJSON(nil, rawJSON),
 			CreatedAt: time.Now().UTC(),
 		})
@@ -468,12 +484,13 @@ func (b *Bridge) handle(ctx context.Context, ev *Event, rawJSON []byte) {
 
 func (b *Bridge) bumpRunTokens(ctx context.Context, ev *Event) error {
 	// No-op if the event carries nothing (defensive).
-	if ev.InputTokens == 0 && ev.OutputTokens == 0 && ev.CacheCreationInputTokens == 0 && ev.CacheReadInputTokens == 0 {
+	if ev.InputTokens == 0 && ev.OutputTokens == 0 && ev.CacheCreationInputTokens == 0 &&
+		ev.CacheReadInputTokens == 0 && ev.ReasoningTokens == 0 {
 		return nil
 	}
 	return b.stores.Runs.AddTokens(ctx, ev.RunID,
 		ev.InputTokens, ev.OutputTokens,
-		ev.CacheCreationInputTokens, ev.CacheReadInputTokens)
+		ev.CacheCreationInputTokens, ev.CacheReadInputTokens, ev.ReasoningTokens)
 }
 
 func (b *Bridge) persistVuln(ctx context.Context, ev *Event) error {

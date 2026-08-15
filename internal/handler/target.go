@@ -42,10 +42,11 @@ var targetTypes = map[string]struct{}{
 
 // createTargetReq is the JSON body for POST /api/targets.
 type createTargetReq struct {
-	Input    string `json:"input"`
-	Type     string `json:"type"`
-	Name     string `json:"name"`
-	RedLines string `json:"red_lines"`
+	Input      string `json:"input"`
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	RedLines   string `json:"red_lines"`
+	MaxWorkers int    `json:"max_workers"`
 }
 
 // Create handles POST /api/targets.
@@ -78,6 +79,14 @@ func (h *TargetHandler) Create(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Per-project worker concurrency cap (0 = platform default).
+	if req.MaxWorkers > 0 {
+		if req.MaxWorkers > 16 {
+			req.MaxWorkers = 16
+		}
+		attrs["max_workers"] = req.MaxWorkers
 	}
 
 	attrJSON, err := json.Marshal(attrs)

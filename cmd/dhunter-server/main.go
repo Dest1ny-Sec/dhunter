@@ -75,8 +75,8 @@ func main() {
 	}
 	cancelBoot()
 
-	// --- Bootstrap admin password (stable across restarts) ---------
-	passwordHash, generated, err := bootstrapAdmin(cfg, stores.Settings)
+	// --- Bootstrap admin account (stable across restarts) ----------
+	adminUser, passwordHash, generated, err := bootstrapAdmin(cfg, stores.Settings)
 	if err != nil {
 		log.Fatalf("dhunter: bootstrap admin: %v", err)
 	}
@@ -95,12 +95,14 @@ func main() {
 
 	mountWebUI(router)
 	router.GET("/api/healthz", handler.Healthz)
-	router.POST("/api/auth/login", handler.NewAuthHandler(cfg.Admin.Token, passwordHash).Login)
+	authH := handler.NewAuthHandler(cfg.Admin.Token, adminUser, passwordHash, stores.Settings)
+	router.POST("/api/auth/login", authH.Login)
 
 	// Authenticated API group.
 	api := router.Group("/api")
 	api.Use(middleware.Bearer(cfg.Admin.Token))
 	{
+		api.POST("/auth/change", authH.Change)
 		targetH := handler.NewTargetHandler(stores)
 		api.POST("/targets", targetH.Create)
 		api.GET("/targets", targetH.List)
@@ -112,6 +114,7 @@ func main() {
 		runH := handler.NewRunHandler(stores, bridge, hub)
 		api.POST("/runs", runH.Create)
 		api.POST("/runs/:id/cancel", runH.Cancel)
+		api.POST("/runs/:id/pause", runH.Pause)
 		api.POST("/runs/:id/continue", runH.Continue)
 
 		runsH := handler.NewRunsHandler(stores)
@@ -129,6 +132,10 @@ func main() {
 
 		reportH := handler.NewReportHandler(stores)
 		api.GET("/runs/:id/report", reportH.Markdown)
+		api.GET("/targets/:id/report", reportH.ProjectReport)
+
+		searchH := handler.NewSearchHandler(stores)
+		api.GET("/search/messages", searchH.Messages)
 
 		// Platform status — lets the UI self-describe the bundled services
 		// instead of asking the user to configure them by hand. The server
@@ -140,6 +147,7 @@ func main() {
 		api.POST("/settings/llm/test", settingsH.TestLLM)
 		api.GET("/settings/budget", settingsH.GetBudget)
 		api.PUT("/settings/budget", settingsH.SaveBudget)
+		api.POST("/settings/clear-data", settingsH.ClearData)
 		api.GET("/knowledge", settingsH.KnowledgeList)
 		api.POST("/knowledge", settingsH.KnowledgeAdd)
 
@@ -226,43 +234,55 @@ func main() {
 	log.Printf("dhunter: bye")
 }
 
-// bootstrapAdmin returns the bcrypt hash to use for the admin password.
-// If a bootstrap password is configured in YAML, we hash it. Otherwise we
-// reuse a previously generated password (persisted in the settings table)
-// so restarts don't invalidate the operator's session; only the very first
-// run generates and prints a fresh random password.
-func bootstrapAdmin(cfg *config.Config, settings *store.SettingsStore) (hash string, generated bool, err error) {
-	const key = "admin_password_hash"
+// bootstrapAdmin resolves the admin login credentials (username + password
+// hash) used by /api/auth/login.
+//
+// Precedence: PERSISTED credentials win (first-run generation or a Settings
+// rotation), so changes survive restarts. A YAML bootstrap_password only
+// SEEDS the very first run (and is then persisted). If neither is present a
+// fresh random password is generated and printed in the banner exactly once.
+func bootstrapAdmin(cfg *config.Config, settings *store.SettingsStore) (username, hash string, generated bool, err error) {
 	ctx := context.Background()
 
-	if cfg.Admin.BootstrapPassword != "" {
-		h, err := bcrypt.GenerateFromPassword([]byte(cfg.Admin.BootstrapPassword), bcrypt.DefaultCost)
-		if err != nil {
-			return "", false, err
-		}
-		return string(h), false, nil
+	// Resolve the username: a persisted one wins, else the configured default.
+	username = cfg.Admin.Username
+	if username == "" {
+		username = "admin"
 	}
-	// Reuse the stored hash if it exists (stable password across restarts).
-	if existing, _ := settings.Get(ctx, key); existing != "" {
+	if persistedUser, _ := settings.Get(ctx, handler.KeyAdminUsername); persistedUser != "" {
+		username = persistedUser
+	}
+	cfg.Admin.Username = username
+
+	// Persisted credentials win — a Settings rotation must survive restarts.
+	if existing, _ := settings.Get(ctx, handler.KeyAdminPasswordHash); existing != "" {
 		cfg.Admin.BootstrapPassword = "[persisted]"
-		return existing, false, nil
+		return username, existing, false, nil
 	}
-	// First run: generate, persist the hash, and print the plaintext once.
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return "", false, err
+
+	// Seed the very first run: configured YAML password, else a random one.
+	plain := cfg.Admin.BootstrapPassword
+	if plain == "" {
+		raw := make([]byte, 16)
+		if _, err := rand.Read(raw); err != nil {
+			return "", "", false, err
+		}
+		plain = hex.EncodeToString(raw)
+		generated = true
 	}
-	plain := hex.EncodeToString(raw)
 	h, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	if err := settings.Set(ctx, key, string(h)); err != nil {
-		return "", false, err
+	if err := settings.Set(ctx, handler.KeyAdminPasswordHash, string(h)); err != nil {
+		return "", "", false, err
+	}
+	if err := settings.Set(ctx, handler.KeyAdminUsername, username); err != nil {
+		return "", "", false, err
 	}
 	// Stash the plaintext on the config so the banner can print it.
 	cfg.Admin.BootstrapPassword = plain
-	return string(h), true, nil
+	return username, string(h), generated, nil
 }
 
 // printBanner dumps the multi-line startup banner. The format is
@@ -286,15 +306,17 @@ func printBanner(cfg *config.Config, adminGenerated bool) {
 	if adminGenerated {
 		banner = append(banner,
 			"  ADMIN SETUP REQUIRED",
+			fmt.Sprintf("    username: %s", cfg.Admin.Username),
 			fmt.Sprintf("    password: %s", cfg.Admin.BootstrapPassword),
 			"    token:    "+cfg.Admin.Token,
-			"    (change both in configs/dhunter.yaml before exposing the API)",
+			"    (login with username/password, then change them in Settings)",
 		)
 	} else {
 		banner = append(banner,
 			"  ADMIN",
-			"    using configured bootstrap password (set in YAML)",
-			"    token: "+cfg.Admin.Token,
+			fmt.Sprintf("    username: %s", cfg.Admin.Username),
+			"    password: [set — rotate via Settings or YAML bootstrap_password]",
+			"    token:    "+cfg.Admin.Token,
 		)
 	}
 	for _, line := range banner {

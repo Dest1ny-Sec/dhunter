@@ -54,6 +54,7 @@ type Run struct {
 	// Cumulative LLM token usage across the run.
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
+	ReasoningTokens          int `json:"reasoning_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
@@ -356,15 +357,16 @@ func (s *RunStore) Update(ctx context.Context, r *Run) error {
 
 // AddTokens adds token counts to an existing run. Zero values are
 // ignored so partial updates are safe.
-func (s *RunStore) AddTokens(ctx context.Context, runID string, in, out, cc, cr int) error {
+func (s *RunStore) AddTokens(ctx context.Context, runID string, in, out, cc, cr, re int) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET
 			input_tokens = input_tokens + ?,
 			output_tokens = output_tokens + ?,
 			cache_creation_input_tokens = cache_creation_input_tokens + ?,
-			cache_read_input_tokens = cache_read_input_tokens + ?
+			cache_read_input_tokens = cache_read_input_tokens + ?,
+			reasoning_tokens = reasoning_tokens + ?
 		 WHERE id = ?`,
-		in, out, cc, cr, runID)
+		in, out, cc, cr, re, runID)
 	return err
 }
 
@@ -372,7 +374,8 @@ func (s *RunStore) AddTokens(ctx context.Context, runID string, in, out, cc, cr 
 func (s *RunStore) Get(ctx context.Context, id string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, target_id, objective, status, summary, started_at, ended_at,
-			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens
+			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+			reasoning_tokens
 		 FROM runs WHERE id = ?`, id)
 	return scanRun(row)
 }
@@ -384,7 +387,8 @@ func (s *RunStore) ListByTarget(ctx context.Context, targetID string, limit int)
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, target_id, objective, status, summary, started_at, ended_at,
-			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens
+			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+			reasoning_tokens
 		 FROM runs WHERE target_id = ? ORDER BY started_at DESC LIMIT ?`, targetID, limit)
 	if err != nil {
 		return nil, err
@@ -408,7 +412,8 @@ func (s *RunStore) List(ctx context.Context, limit int) ([]*Run, error) {
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, target_id, objective, status, summary, started_at, ended_at,
-			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens
+			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+			reasoning_tokens
 		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -430,7 +435,8 @@ func scanRun(r rowScanner) (*Run, error) {
 	var startedMs int64
 	var endedMs sql.NullInt64
 	if err := r.Scan(&run.ID, &run.TargetID, &run.Objective, &run.Status, &run.Summary, &startedMs, &endedMs,
-		&run.InputTokens, &run.OutputTokens, &run.CacheCreationInputTokens, &run.CacheReadInputTokens); err != nil {
+		&run.InputTokens, &run.OutputTokens, &run.CacheCreationInputTokens, &run.CacheReadInputTokens,
+		&run.ReasoningTokens); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -467,11 +473,100 @@ func (s *MessageStore) Append(ctx context.Context, m *Message) error {
 	if len(m.Payload) == 0 {
 		m.Payload = json.RawMessage(`{}`)
 	}
-	_, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages (id, run_id, role, event_type, content, payload, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.RunID, m.Role, m.EventType, m.Content, string(m.Payload), m.CreatedAt.UnixMilli())
-	return err
+		m.ID, m.RunID, m.Role, m.EventType, m.Content, string(m.Payload), m.CreatedAt.UnixMilli()); err != nil {
+		return err
+	}
+	// Keep the FTS index in sync (best-effort: search availability must not
+	// break message persistence).
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO messages_fts (message_id, content) VALUES (?, ?)`,
+		m.ID, m.Content); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// MessageHit is one full-text search result, joined back to its run + target.
+type MessageHit struct {
+	ID        string    `json:"id"`
+	RunID     string    `json:"run_id"`
+	Role      string    `json:"role"`
+	EventType string    `json:"event_type"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	TargetID  string    `json:"target_id,omitempty"`
+	Target    string    `json:"target,omitempty"`
+}
+
+// Search full-text searches message content (trigram FTS for queries of 3+
+// chars, LIKE fallback for shorter ones). Results are newest first.
+func (s *MessageStore) Search(ctx context.Context, query string, limit int) ([]*MessageHit, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return []*MessageHit{}, nil
+	}
+	var rows *sql.Rows
+	var err error
+	if len([]rune(q)) >= 3 {
+		// trigram MATCH: the tokenizer requires >= 3 characters. Wrap the
+		// user input in an FTS5 phrase literal (doubling embedded quotes) so
+		// FTS5 syntax like `AND`, `OR`, `'` or `"` is treated as literal text
+		// instead of a query operator — otherwise those queries 500.
+		escaped := strings.ReplaceAll(q, `"`, `""`)
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT m.id, m.run_id, m.role, m.event_type, m.content, m.created_at,
+			        r.target_id, t.normalized
+			 FROM messages m
+			 JOIN runs r ON r.id = m.run_id
+			 LEFT JOIN targets t ON t.id = r.target_id
+			 WHERE m.id IN (SELECT message_id FROM messages_fts WHERE messages_fts MATCH '"' || ? || '"')
+			 ORDER BY m.created_at DESC LIMIT ?`, escaped, limit)
+	} else {
+		like := "%" + q + "%"
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT m.id, m.run_id, m.role, m.event_type, m.content, m.created_at,
+			        r.target_id, t.normalized
+			 FROM messages m
+			 JOIN runs r ON r.id = m.run_id
+			 LEFT JOIN targets t ON t.id = r.target_id
+			 WHERE m.content LIKE ? OR m.payload LIKE ?
+			 ORDER BY m.created_at DESC LIMIT ?`, like, like, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*MessageHit, 0)
+	for rows.Next() {
+		var h MessageHit
+		var targetID sql.NullString
+		var target sql.NullString
+		var ts int64
+		if err := rows.Scan(&h.ID, &h.RunID, &h.Role, &h.EventType, &h.Content, &ts,
+			&targetID, &target); err != nil {
+			return nil, err
+		}
+		h.CreatedAt = time.UnixMilli(ts).UTC()
+		if targetID.Valid {
+			h.TargetID = targetID.String
+		}
+		if target.Valid {
+			h.Target = target.String
+		}
+		out = append(out, &h)
+	}
+	return out, rows.Err()
 }
 
 // ListByRun returns all messages for a run in insertion order.
@@ -732,6 +827,34 @@ func (s *ToolCallStore) Append(ctx context.Context, t *ToolCall) error {
 	return err
 }
 
+// AppendResult fills the result into the latest tool_call row for the same
+// run+name that has no result yet — so a single logical tool invocation maps
+// to ONE row (call args + result), not two. Falls back to a standalone row if
+// no matching open call exists.
+func (s *ToolCallStore) AppendResult(ctx context.Context, runID, name, result string, isError bool, durationMs int64) error {
+	ie := 0
+	if isError {
+		ie = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE tool_calls SET result = ?, is_error = ?, duration_ms = ?
+		 WHERE id = (SELECT id FROM tool_calls
+		             WHERE run_id = ? AND name = ? AND result = ''
+		             ORDER BY created_at DESC, id DESC LIMIT 1)`,
+		result, ie, durationMs, runID, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	// No open row to merge into — persist the result as its own record.
+	return s.Append(ctx, &ToolCall{
+		RunID: runID, Name: name, Result: result,
+		IsError: isError, DurationMs: durationMs, CreatedAt: time.Now().UTC(),
+	})
+}
+
 // ListByRun returns tool calls in insertion order.
 func (s *ToolCallStore) ListByRun(ctx context.Context, runID string) ([]*ToolCall, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -886,4 +1009,34 @@ func assertNotFound(err error) error {
 		return ErrNotFound
 	}
 	return fmt.Errorf("store: %w", err)
+}
+
+// ClearAllData wipes all test/scan data — targets, runs, their messages and
+// tool calls, the board (facts/intents/hints), vulnerabilities, and reusable
+// knowledge — while preserving settings (admin credentials, LLM config,
+// budget). Called from the "清空数据" action in the UI.
+func (s *Stores) ClearAllData(ctx context.Context) error {
+	stmts := []string{
+		`DELETE FROM messages;`,
+		`DELETE FROM tool_calls;`,
+		`DELETE FROM facts;`,
+		`DELETE FROM intents;`,
+		`DELETE FROM hints;`,
+		`DELETE FROM vulnerabilities;`,
+		`DELETE FROM runs;`,
+		`DELETE FROM targets;`,
+		`DELETE FROM knowledge;`,
+		`DELETE FROM messages_fts;`,
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

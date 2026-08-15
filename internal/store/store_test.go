@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -43,10 +44,10 @@ func TestRunStoreAddTokensAccumulates(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	if err := s.Runs.AddTokens(ctx, run.ID, 100, 20, 50, 30); err != nil {
+	if err := s.Runs.AddTokens(ctx, run.ID, 100, 20, 50, 30, 40); err != nil {
 		t.Fatalf("add tokens: %v", err)
 	}
-	if err := s.Runs.AddTokens(ctx, run.ID, 50, 10, 0, 0); err != nil {
+	if err := s.Runs.AddTokens(ctx, run.ID, 50, 10, 0, 0, 0); err != nil {
 		t.Fatalf("add tokens: %v", err)
 	}
 
@@ -54,7 +55,8 @@ func TestRunStoreAddTokensAccumulates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if got.InputTokens != 150 || got.OutputTokens != 30 || got.CacheCreationInputTokens != 50 || got.CacheReadInputTokens != 30 {
+	if got.InputTokens != 150 || got.OutputTokens != 30 || got.CacheCreationInputTokens != 50 ||
+		got.CacheReadInputTokens != 30 || got.ReasoningTokens != 40 {
 		t.Fatalf("tokens not accumulated: %+v", got)
 	}
 }
@@ -253,5 +255,90 @@ func TestRunRecoverStale(t *testing.T) {
 	}
 	if g2.Status != "completed" {
 		t.Fatalf("completed run must be untouched, got %s", g2.Status)
+	}
+}
+
+func TestMessageSearchFTSEscaping(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	tgt := &Target{Type: "url", Value: "https://sso.example.com", Normalized: "sso.example.com"}
+	if err := s.Targets.Create(ctx, tgt); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	run := &Run{TargetID: tgt.ID, Status: "running", StartedAt: time.Now().UTC()}
+	if err := s.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := s.Messages.Append(ctx, &Message{RunID: run.ID, Role: "assistant", EventType: "message_done", Content: "checkNeedCaptcha admin 验证码 admin' 测试内容"}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Queries containing FTS5 syntax must NOT error (they are treated as
+	// literal text). Content-present queries return hits; operators that don't
+	// appear in the content may legitimately return 0.
+	for _, q := range []string{"checkNeedCaptcha", "验证码", "admin'", "admin AND", `"`} {
+		hits, err := s.Messages.Search(ctx, q, 10)
+		if err != nil {
+			t.Fatalf("Search(%q) errored: %v", q, err)
+		}
+		if (q == "checkNeedCaptcha" || q == "验证码" || q == "admin'") && len(hits) < 1 {
+			t.Fatalf("Search(%q) returned no hits for known content", q)
+		}
+	}
+}
+
+func TestMessageSearchShortAndEmpty(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Empty query -> empty result, no error.
+	if hits, err := s.Messages.Search(ctx, "  ", 10); err != nil || len(hits) != 0 {
+		t.Fatalf("empty query: hits=%d err=%v", len(hits), err)
+	}
+	// <3 chars -> LIKE fallback, must not error and should find a match.
+	tgt := &Target{Type: "url", Value: "https://x.com", Normalized: "x.com"}
+	_ = s.Targets.Create(ctx, tgt)
+	run := &Run{TargetID: tgt.ID, Status: "running", StartedAt: time.Now().UTC()}
+	_ = s.Runs.Create(ctx, run)
+	_ = s.Messages.Append(ctx, &Message{RunID: run.ID, Role: "assistant", Content: "登录成功"})
+	hits, err := s.Messages.Search(ctx, "登录", 10)
+	if err != nil {
+		t.Fatalf("short query errored: %v", err)
+	}
+	if len(hits) < 1 {
+		t.Fatalf("short query returned no hits")
+	}
+}
+
+func TestToolCallAppendResultMergesIntoOpenRow(t *testing.T) {
+	s, cleanup := newTestStores(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Call row with args, no result yet.
+	if err := s.ToolCalls.Append(ctx, &ToolCall{RunID: "r1", Name: "http_request", Arguments: json.RawMessage(`{"url":"x"}`)}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	// Result merges into that row — not a new row.
+	if err := s.ToolCalls.AppendResult(ctx, "r1", "http_request", "HTTP 200 ok", false, 42); err != nil {
+		t.Fatalf("appendResult: %v", err)
+	}
+	calls, _ := s.ToolCalls.ListByRun(ctx, "r1")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 merged row, got %d", len(calls))
+	}
+	if calls[0].Result != "HTTP 200 ok" || calls[0].DurationMs != 42 {
+		t.Fatalf("result not merged: %+v", calls[0])
+	}
+	// Second call has no open row -> falls back to a standalone row.
+	if err := s.ToolCalls.AppendResult(ctx, "r1", "write_fact", "ok", false, 5); err != nil {
+		t.Fatalf("appendResult fallback: %v", err)
+	}
+	calls, _ = s.ToolCalls.ListByRun(ctx, "r1")
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 rows after fallback, got %d", len(calls))
 	}
 }
