@@ -1,110 +1,198 @@
-# Dhunter
+<p align="center">
+  <img src="assets/screenshots/dashboard.png" width="100%" alt="Dhunter 主界面：目标、运行记录、漏洞成果一览" />
+</p>
 
-> AI-driven web penetration testing platform. Input a company name or a target URL, watch the agent plan, test, validate, and report.
+<h1 align="center">Dhunter</h1>
 
-Dhunter is a commercial-grade red-team productivity tool. It is not a vulnerability scanner: a single (and later multi-) LLM agent drives a curated toolbox to perform **manual-style** reconnaissance, active probing, and exploit verification.
+<p align="center">
+  <b>AI 驱动的自主渗透测试平台</b><br />
+  输入一个域名或 URL，Dhunter 的 AI 渗透 agent 会自动完成：<b>侦察 → 规划 → 主动测试 → 漏洞验证 → 生成报告</b>。
+</p>
 
-> v0.2 scope: blackboard engine (origin/goal facts → planner proposes intents → parallel explore workers conclude facts → verified vulnerabilities → Markdown report).
-> Out of v0.2 scope: report template import, multi-tenant/RBAC, audit log (planned).
-
----
-
-## Highlights
-
-- **Target parser** — accept company name / domain / URL / IP, normalize into a `Target` struct
-- **Blackboard engine** — facts/intents/hints board (SQLite) + a dispatcher running parallel explore workers that coordinate through it (stigmergy), driven by an LLM with a curated tool belt
-- **Real-time thinking stream** — SSE-pushed `reasoning_delta` / `tool_call` / `tool_result` / `response_delta` events
-- **Active testing tools** — HTTP probing, parameter fuzzing, auth bypass, info-leak path discovery
-- **Vulnerability store** — SQLite, FK-bound to `Target` and `Run`
-- **One-click report** — Markdown export per run
-- **Cross-platform** — single static binary for Win/Mac/Linux, no installer, no Python runtime on the user side (Python agent is shipped embedded or run as a sidecar binary)
+<p align="center">
+  <a href="#-快速开始">🚀 快速开始</a> ·
+  <a href="#-核心特性">✨ 核心特性</a> ·
+  <a href="#-真实效果">📸 真实效果</a> ·
+  <a href="#-架构">🏗 架构</a> ·
+  <a href="#-免责声明">⚠️ 免责声明</a>
+</p>
 
 ---
 
-## Architecture (MVP)
+> ⚠️ **仅供学术交流与安全研究使用 · 禁止用于任何非法或盈利行为。**
+> 请确保所有测试目标均已获得授权。
+
+---
+
+## 它不是漏扫，而是一个"手动化"的渗透测试 agent
+
+传统漏扫器只会跑 CVE 指纹和已知 payload。Dhunter 让一个（未来多个）**LLM agent** 驱动一套精选工具，像真人渗透测试员那样思考与行动：
+
+- 先做**侦察**（子域 / JS / 指纹 / 历史 URL），把攻击面摸清；
+- 再**规划**攻击意图，一个黑板（blackboard）协调多个 worker **并行探索**；
+- 每个结论都要**先验证再上报**——SRC 验收门禁会机械重放你的 PoC，时变噪声会被自动驳回；
+- 最终把确认的漏洞汇总成一份 **Markdown 报告**。
+
+## ✨ 核心特性
+
+| 特性 | 说明 |
+|---|---|
+| 🧠 **黑板引擎** | facts/intents/hints 持久化到 SQLite，planner 提出意图 → 多 worker 并行探索 → 收敛，纯 stigmergy 协调 |
+| 🔍 **手动化侦察** | 子域枚举、JS 资产与凭据分析、历史 URL、技术指纹，20+ 内置工具随平台启动 |
+| ⚔️ **主动测试** | HTTP 手工探测、参数 fuzz、认证绕过、信息泄露路径、业务逻辑测试，agent 自主选工具 |
+| 🛡️ **SRC 验收门禁** | verifier 对每条漏洞做**机械重放 + 稳定性检查**：同一 PoC 两次结果不一致 = 时变噪声 → 自动驳回，杜绝误报 |
+| ⚡ **实时思考流** | SSE 实时推送 agent 的思考、工具调用、工具结果，整个过程透明可见 |
+| 📊 **攻击链视图** | 以图的形式展示已确认的事实与攻击路径 |
+| 🧵 **每项目并发设置** | 创建目标时可指定并发 worker 数，深挖大目标时加大并发、小目标降速省 token |
+| ⏸️ **运行暂停/恢复** | 随时暂停 run（保留已发现的黑板），之后一键「继续」从断点恢复 |
+| 🎯 **漏洞优先验证** | worker 每落地一条漏洞立即触发 verifier 机械重放验证，不用等扫描结束 |
+| 📦 **项目一键导出** | 目标卡上「导出报告」打包该项目全部漏洞为 Markdown（含 PoC/复现/证据） |
+| 📄 **一键报告** | 每次运行导出 Markdown 报告 |
+| 🔐 **首启自动账号** | 首次运行自动生成管理账号（用户名 + 随机密码），横幅展示，之后可在设置页修改 |
+| 💻 **跨平台** | macOS / Linux / Windows 三平台启动脚本，Go 纯静态二进制（无 CGO） |
+
+## 📸 真实效果
+
+<p align="center">
+  <img src="assets/screenshots/attack-graph.png" width="100%" alt="攻击链图 — 一次真实渗透中自动构建的事实/意图/发现网络" />
+  <em>攻击链图：agent 自主构建的事实 → 意图 → 发现网络，实时可视化</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/vulns.png" width="49%" alt="漏洞成果列表" />
+  <img src="assets/screenshots/targets.png" width="49%" alt="授权目标管理" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/search.png" width="49%" alt="历史对话全文搜索" />
+  <img src="assets/screenshots/report.png" width="49%" alt="Markdown 漏洞报告" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/settings.png" width="49%" alt="设置：模型/账号/并发/清空数据" />
+  <img src="assets/screenshots/dashboard.png" width="49%" alt="仪表盘总览" />
+</p>
+
+## 🚀 快速开始
+
+### 一键启动（推荐）
+
+```bash
+# macOS / Linux
+./scripts/start-dhunter.sh start
+
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start
+```
+
+启动后打开 <http://127.0.0.1:13343/>。
+
+**首次运行的登录账号会自动生成**，在启动横幅（终端 / 日志）中可见：
+
+```
+╔════════════════════════════════════════════════════════╗
+║                       Dhunter                          ║
+╚════════════════════════════════════════════════════════╝
+  ONLINE  http://127.0.0.1:13343/
+  ADMIN SETUP REQUIRED
+    username: admin
+    password: <随机生成，仅显示一次>
+    token:    <随机生成>
+```
+
+登录后可在**设置 → 登录账号**里修改用户名和密码。之后每次重启登录凭据保持不变。
+
+### 使用流程（用户视角）
+
+1. **授权目标** → 新建目标：填目标（公司/域名/URL/IP）、目标说明、可选身份会话与红线，按需设置**并发 worker 数**
+2. **启动评估** → 平台自动跑：planner 规划攻击意图 → 多 worker 并行探索 → **每落地一条漏洞立即机械重放验证**
+3. **实时跟踪** → 运行详情页看 agent 思考流、工具调用、攻击图；扫到一半可 **⏸ 暂停**，之后 **▶ 继续**
+4. **导出报告** → 目标卡「导出报告」一键打包该项目全部漏洞（Markdown，含 PoC/复现/证据）；运行详情也有单次 Markdown 报告
+
+### 手动启动
+
+```bash
+# 1. 构建 Go 平台（server + MCP 工具）
+go build -o bin/dhunter-server ./cmd/dhunter-server
+go build -o bin/dhunter-mcp    ./cmd/dhunter-mcp
+
+# 2. 启动 Python agent（黑板引擎）
+cd agents
+pip install -r requirements.txt
+python -m core.server          # 127.0.0.1:9100
+
+# 3. 启动 server
+./bin/dhunter-server --config configs/dhunter.yaml
+```
+
+### 配置 LLM
+
+Dhunter 兼容 Anthropic / OpenAI 协议（DeepSeek / MiniMax / Qwen / GLM / Claude…）。在**设置页**填入模型、Base URL、API Key 并测试连接，或在 `configs/dhunter.yaml` 配置：
+
+```yaml
+llm:
+  provider: anthropic
+  model: "deepseek-chat"
+  base_url: "https://api.deepseek.com/anthropic"
+  api_key: "sk-..."
+```
+
+## 🏗 架构
 
 ```
 ┌────────────────┐     ┌────────────────┐     ┌─────────────────┐
-│  Vue 3 Web UI  │ ←─→ │ Go HTTP+SSE    │ ←─→ │ Python Agent    │
-│  (Vite build)  │     │  (Gin)         │     │ (FastAPI + MCP) │
-└────────────────┘     └────────────────┘     └─────────────────┘
-                              │                       │
-                              ↓                       ↓
+│  Vue 3 Web UI  │ ←─→ │ Go HTTP + SSE  │ ←─→ │ Python Agent    │
+│  (Vite build)  │     │  (Gin)         │     │ (黑板 + worker) │
+└────────────────┘     └────────────────┘     └────────┬────────┘
+                              │                        │
+                              ↓                        ↓
                        ┌────────────┐         ┌──────────────┐
-                       │  SQLite    │         │  MCP tools   │
-                       │  targets/  │         │  webhunter/  │
-                       │  runs/     │         │  recon/      │
-                       │  vulns/    │         │  exploit/    │
+                       │  SQLite    │         │  MCP 工具集  │
+                       │ targets /  │         │  侦察 / 指纹  │
+                       │ runs /     │         │  主动测试     │
+                       │ vulns /    │         │  报告         │
                        └────────────┘         └──────────────┘
 ```
 
-For the MVP, Dhunter **reuses the webhunter tool belt** built on top of `desredteam/cmd/webhunter-mcp` (compatible streamable-HTTP MCP). The tool source is vendored under `internal/mcp/webhunter/` and licensed under Dhunter's commercial terms; the original `desredteam` brand is removed from all user-facing text, logs, and metadata.
+**运行流程**：`origin/goal 事实` 种入黑板 → planner（reason）提出攻击意图 → 多 worker 并行探索并回写事实 → 收敛 → verifier 对每条漏洞做机械重放验收 → 生成报告。worker 之间不直接通信，全靠黑板协调（stigmergy）。
 
----
+## ⚙️ 配置
 
-## Quick start (developer)
+| Key | 默认值 | 说明 |
+|---|---|---|
+| `server.port` | `13343` | HTTP 端口 |
+| `agent.python_url` | `http://127.0.0.1:9100` | Python agent |
+| `mcp.webhunter.url` | `http://127.0.0.1:9124/message` | MCP 工具端点 |
+| `llm.provider` | `anthropic` | `anthropic` / `openai` |
+| `storage.sqlite_path` | `../data/dhunter.db` | 相对配置文件解析，跨平台 |
+| `admin.username` | `admin` | 登录用户名（首启可改） |
+| `admin.bootstrap_password` | 空 | 首次启动初始密码；留空则随机生成。改密码请用设置页 |
+
+环境变量：`DHUNTER_PORT` / `DHUNTER_SQLITE_PATH` / `DHUNTER_LLM_API_KEY` / `DHUNTER_ADMIN_TOKEN` 等均可覆盖 YAML。
+
+## 🔧 常用命令
 
 ```bash
-# 1. Build the Go platform
-go build -o bin/dhunter-server ./cmd/dhunter-server
-
-# 2. Build the embedded webhunter MCP tool
-go build -o bin/dhunter-mcp ./cmd/dhunter-mcp
-
-# 3. Run the Python agent service
-cd agents
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m core.server          # listens on 127.0.0.1:9100
-
-# 4. Frontend
-cd ../frontend
-npm install
-npm run dev                    # http://127.0.0.1:5173
-
-# 5. Or use the all-in-one launcher
-./scripts/run-dev.sh
+./scripts/start-dhunter.sh status   # 查看三件套状态
+./scripts/start-dhunter.sh stop     # 停止
+./scripts/start-dhunter.sh logs     # 跟踪日志
 ```
 
-Open <http://127.0.0.1:8080/> (default port; override with `--port`).
+## ⚠️ 免责声明
+
+**Dhunter 是一个安全研究与教育培训工具。**
+
+- 仅供学术交流、安全研究与技术讨论使用；
+- **严禁用于任何非法活动、未授权测试或盈利行为**；
+- 使用者必须确保所有测试目标已获得明确授权；
+- 使用者应对自身行为及其后果承担全部责任，作者不对任何滥用行为负责。
+
+详见 [LICENSE](LICENSE)。
+
+## 📜 License
+
+[非商业学术许可（Non-Commercial Academic License）](LICENSE) — 允许学术交流与安全研究使用，禁止任何商业与盈利行为。
 
 ---
 
-## Configuration
-
-| Key | Default | Notes |
-|---|---|---|
-| `server.port` | `8080` | Go HTTP port |
-| `server.sse_keepalive_seconds` | `15` | SSE heartbeat |
-| `agent.python_url` | `http://127.0.0.1:9100` | Python sidecar |
-| `mcp.webhunter.url` | `http://127.0.0.1:9124/message` | Streamable-HTTP MCP |
-| `mcp.webhunter.token` | `<random per install>` | bearer token |
-| `llm.provider` | `anthropic` | `anthropic` / `openai_compatible` |
-| `llm.model` | `claude-sonnet-4-5` | model id |
-| `llm.api_key` | (env `DHUNTER_LLM_KEY`) | LLM credential |
-| `storage.sqlite_path` | `./data/dhunter.db` | vuln / run store |
-
----
-
-## License
-
-Commercial. See `LICENSE` for terms. This product is not affiliated with, endorsed by, or derived from any public open-source project under any branding you may have seen before.
-
----
-
-## Roadmap (post-MVP)
-
-- v1.1 — Multi-agent (Planner / Worker × N / Reviewer / Reporter)
-- v1.2 — Attack-chain graph (react-flow + live updates)
-- v1.3 — Report templates (import `.md` / `.docx` with placeholders)
-- v1.4 — Multi-target runs in parallel
-- v2.0 — Team mode, RBAC, audit log, deployment telemetry
-
-
-## Cross-platform
-
-- **macOS / Linux**: `./scripts/start-dhunter.sh start`
-- **Windows**: `powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start`
-- **Any (Docker)**: `docker build -t dhunter . && docker run -p 13343:13343 -e DHUNTER_LLM_KEY=sk-... dhunter`
-
-The server, MCP toolbelt, and agent are all cross-platform (pure-Go binaries + Python).
+<p align="center"><sub>Dhunter · 仅供学术交流与安全研究 · 请勿用于非法或盈利用途</sub></p>

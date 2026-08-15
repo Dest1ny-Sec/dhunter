@@ -1,16 +1,32 @@
-Commercial License Agreement
+# Dhunter 非商业学术许可（Non-Commercial Academic License）
 
-Dhunter v0.1.0 (MVP)
+Copyright (c) 2026 Dhunter 作者（保留所有权利）
 
-Copyright (c) 2026, all rights reserved.
+## 允许（免费）
 
-This software is licensed, not sold. Use, modification, and redistribution
-are subject to the terms of a separate signed commercial agreement with the
-copyright holder. Without such an agreement, you may not use, copy, modify,
-merge, publish, distribute, sublicense, or sell copies of this software.
+在**学术交流、安全研究、教育培训、个人学习**等**非商业**场景下，你可以：
+- 使用、复制、修改本软件及其源代码；
+- 将修改后的版本用于上述非商业场景；
+- 在不作商业盈利的前提下，以学术分享形式分发（需保留本许可声明与本免责声明）。
 
-The product name, visual identity, documentation, and any associated marks
-are the property of the copyright holder and may not be used to endorse or
-promote products derived from this software without prior written consent.
+## 禁止
 
-For licensing inquiries, contact the copyright holder.
+- **任何商业用途、盈利行为、有偿服务**：包括但不限于将本软件或其衍生版本用于商业渗透测试服务、安全产品、SaaS、销售、租赁、广告或其他以营利为目的的活动；
+- 去除、篡改、模糊化本软件中的版权标识、免责声明或本许可声明；
+- 以本软件或其作者的名义对衍生作品进行背书或推广，除非获得作者书面许可。
+
+## 使用前提与免责声明
+
+本软件是**安全研究工具**。使用者必须：
+- 仅在**已获得授权**的目标上进行测试；
+- 仅用于学术交流与安全研究，禁止用于任何非法活动；
+- 对因使用本软件造成的一切后果自行承担责任。
+
+本软件按"原样"（AS IS）提供，**不附带任何明示或默示的担保**，包括但不限于适销性、特定用途适用性及不侵权担保。在任何情况下，作者均不对因使用或无法使用本软件而产生的任何直接、间接、附带、特殊或后果性损害承担责任。
+
+## 商业授权
+
+如需商业使用，请联系作者另行协商。
+
+---
+本许可是对本软件使用条款的完整表述。使用本软件即视为同意本许可全部条款。

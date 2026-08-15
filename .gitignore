@@ -29,3 +29,9 @@ nohup.out
 
 # OS
 .DS_Store
+
+# runtime logs (agent.log / errors.log)
+logs/
+
+# playwright-mcp test artifacts
+.playwright-mcp/
