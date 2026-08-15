@@ -51,10 +51,22 @@ const routes = [
     meta: { title: '漏洞成果' },
   },
   {
+    path: '/search',
+    name: 'search',
+    component: () => import('./views/SearchView.vue'),
+    meta: { title: '历史对话搜索' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('./views/SettingsView.vue'),
     meta: { title: '设置' },
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('./views/NotFoundView.vue'),
+    meta: { title: '星域之外', public: true },
   },
 ]
 

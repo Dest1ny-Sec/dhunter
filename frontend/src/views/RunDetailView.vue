@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
@@ -10,9 +10,13 @@ import BoardView from '../components/BoardView.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiProgress from '../components/ui/UiProgress.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
+import Icon from '../components/icons/Icon.vue'
 import { api } from '../api/client'
 
+const router = useRouter()
 const route = useRoute()
+
 const runId = computed(() => route.params.id as string)
 
 const tab = ref<'results' | 'tools' | 'board' | 'stream' | 'report'>('results')
@@ -72,6 +76,13 @@ const toolCalls = computed(() =>
 const totalTokens = computed(() =>
   (runInfo.value?.input_tokens || 0) + (runInfo.value?.output_tokens || 0) + (runInfo.value?.cache_read_input_tokens || 0)
 )
+// 缓存命中率 = 缓存读取 token / (新鲜输入 + 缓存读取) — 命中越高越省钱。
+const cacheHitRate = computed(() => {
+  const read = runInfo.value?.cache_read_input_tokens || 0
+  const fresh = runInfo.value?.input_tokens || 0
+  const total = read + fresh
+  return total > 0 ? Math.round((read / total) * 100) : 0
+})
 function fmtN(n?: number): string {
   if (n == null) return '—'
   if (n < 1000) return String(n)
@@ -98,6 +109,17 @@ async function continueRun() {
     connectSSE()
   } catch (e: any) {
     alert('继续失败: ' + (e?.response?.data?.error || e?.message))
+  }
+}
+
+async function pauseRun() {
+  if (!confirm('暂停这个 run？已发现的 facts/intents 会保留，可随时点「继续深入」恢复。')) return
+  try {
+    await api.post(`/runs/${runId.value}/pause`)
+    status.value = 'paused'
+    await loadRun()
+  } catch (e: any) {
+    alert('暂停失败: ' + (e?.response?.data?.error || e?.message))
   }
 }
 
@@ -180,16 +202,23 @@ watch(runId, async (v) => {
 
 <template>
   <div class="col" style="height: 100%">
+    <button class="back-btn" @click="router.back()" aria-label="返回">
+      <Icon name="arrow-left" :size="14" />
+      <span>返回</span>
+    </button>
     <div class="run-head">
       <div class="row">
         <h2 style="font-size: 16px; font-weight: 600; margin: 0">Run <code>{{ runId.slice(0, 8) }}</code></h2>
         <UiBadge kind="status" :value="status" :dot="true" />
-        <button v-if="['success','completed','failed','cancelled'].includes(status)" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="continueRun">继续深入</button>
+        <button v-if="['running', 'pending'].includes(status)" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="pauseRun">⏸ 暂停</button>
+        <button v-if="['success','completed','failed','cancelled','paused'].includes(status)" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="continueRun">{{ status === 'paused' ? '▶ 继续' : '继续深入' }}</button>
       </div>
       <div class="run-tokens">
         <UiProgress v-if="totalTokens > 0" :value="totalTokens" :max="Math.max(totalTokens, 1)" tone="accent" label="tokens" />
         <span class="muted" style="font-size: 12px">
-          in {{ fmtN(runInfo?.input_tokens) }} · out {{ fmtN(runInfo?.output_tokens) }} · cache {{ fmtN(runInfo?.cache_read_input_tokens) }}
+          in {{ fmtN(runInfo?.input_tokens) }} · out {{ fmtN(runInfo?.output_tokens) }}
+          · reasoning {{ fmtN(runInfo?.reasoning_tokens) }}
+          · 缓存命中 <b style="color: var(--ok)">{{ cacheHitRate }}%</b>
         </span>
       </div>
       <span class="muted" style="font-size: 12px">{{ events.length }} events</span>
@@ -327,4 +356,20 @@ watch(runId, async (v) => {
 .tool-name { min-width: 120px; }
 .tool-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-status { font-size: 11px; font-weight: 600; }
+
+.back-btn {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 12px;
+  min-height: 30px;
+  font-size: 12px;
+  font-family: var(--font-display);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.back-btn:hover { color: var(--text); border-color: var(--border-bright); background: rgba(125, 146, 232, 0.06); }
 </style>

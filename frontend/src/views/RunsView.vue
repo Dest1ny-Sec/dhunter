@@ -3,7 +3,9 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import UiBadge from '../components/ui/UiBadge.vue'
-import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import Icon from '../components/icons/Icon.vue'
 
 interface Run {
   id: string
@@ -35,6 +37,8 @@ async function load() {
     loading.value = false
   }
 }
+
+function goTargets() { router.push('/targets') }
 
 function duration(r: Run): string {
   if (!r.started_at) return '—'
@@ -70,10 +74,24 @@ onMounted(load)
         <h2 style="font-size: 20px; font-weight: 600; margin: 0">运行记录</h2>
         <div class="muted" style="font-size: 13px; margin-top: 2px">共 {{ runs.length }} 次评估</div>
       </div>
-      <button @click="load">↻ 刷新</button>
+      <button @click="load" :disabled="loading" aria-label="刷新">
+        <Icon name="refresh" :size="14" />
+        <span style="margin-left: 6px">刷新</span>
+      </button>
     </div>
 
-    <div v-if="error" style="color: var(--danger)">{{ error }}</div>
+    <div v-if="error" class="error-state">
+      <Icon name="alert" :size="18" />
+      <div>
+        <div class="error-title">加载失败</div>
+        <div class="error-msg">{{ error }}</div>
+      </div>
+    </div>
+    <div v-else-if="loading" class="card" style="padding: 18px">
+      <div class="sk-list">
+        <UiSkeleton v-for="i in 5" :key="i" block height="44px" radius="8px" />
+      </div>
+    </div>
     <div v-else-if="runs.length" class="card" style="padding: 0">
       <table>
         <thead>
@@ -93,18 +111,38 @@ onMounted(load)
               <code style="font-size: 12px">{{ r.id.slice(0, 8) }}</code>
               <span class="muted" style="font-size: 11px; margin-left: 6px">{{ r.target_value || r.target_id || '' }}</span>
             </td>
-            <td class="muted" style="font-size: 12px">{{ duration(r) }}</td>
-            <td class="muted" style="font-size: 12px">{{ fmtN(tokens(r)) }}</td>
-            <td class="muted" style="font-size: 12px">{{ fmtTime(r.started_at) }}</td>
+            <td class="muted" style="font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums">{{ duration(r) }}</td>
+            <td class="muted" style="font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums">{{ fmtN(tokens(r)) }}</td>
+            <td class="muted" style="font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums">{{ fmtTime(r.started_at) }}</td>
             <td class="muted" style="font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ r.summary }}</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <UiEmpty v-else-if="!loading" icon="⏵" message="暂无运行记录，去授权目标发起一次扫描" />
+    <div v-else class="card" style="padding: 0">
+      <EmptyState
+        icon="play"
+        title="还没有运行记录"
+        description="授权一个目标后，点击「启动评估」即可让 AI 启动一次渗透测试。运行过程、工具调用、token 消耗都会在这里完整留痕。"
+        primary-label="去授权目标"
+        @primary="goTargets"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .runs-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.sk-list { display: flex; flex-direction: column; gap: 8px; }
+.error-state {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 16px 18px;
+  background: rgba(226, 100, 114, 0.08);
+  border: 1px solid rgba(226, 100, 114, 0.28);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.error-state > svg { color: var(--sev-critical); margin-top: 2px; }
+.error-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.error-msg { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 </style>

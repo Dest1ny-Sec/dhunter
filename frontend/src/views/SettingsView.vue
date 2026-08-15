@@ -4,8 +4,10 @@ import { api } from '../api/client'
 import UiCard from '../components/ui/UiCard.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import { useAuthStore } from '../stores/auth'
 
 const status = ref<any>(null)
+const auth = useAuthStore()
 
 // ---- AI API config (ccswitch-style import + test) ----
 const llm = ref({ provider: 'anthropic', base_url: '', model: '', api_key: '', max_tokens: 8192 })
@@ -16,6 +18,36 @@ const llmSaved = ref(false)
 // ---- token budget red line ----
 const budget = ref(0)
 
+// ---- 登录账号（首启自动生成，可在此修改） ----
+const account = ref({ username: '', password: '' })
+const accountMsg = ref<{ ok: boolean; text: string } | null>(null)
+
+// ---- 清空数据（二次确认） ----
+const clearArmed = ref(false)
+const clearMsg = ref<{ ok: boolean; text: string } | null>(null)
+const clearing = ref(false)
+
+async function clearData() {
+  if (!clearArmed.value) {
+    clearArmed.value = true
+    clearMsg.value = null
+    setTimeout(() => (clearArmed.value = false), 6000)
+    return
+  }
+  clearing.value = true
+  clearMsg.value = null
+  try {
+    await api.post('/settings/clear-data')
+    clearMsg.value = { ok: true, text: '已清空全部测试数据' }
+    setTimeout(() => location.reload(), 800)
+  } catch (e: any) {
+    clearMsg.value = { ok: false, text: e?.response?.data?.error || e?.message || '清空失败' }
+  } finally {
+    clearing.value = false
+    clearArmed.value = false
+  }
+}
+
 async function load() {
   try {
     const [st, llmRes, bud] = await Promise.all([
@@ -24,7 +56,26 @@ async function load() {
     status.value = st.data
     if (llmRes.data?.model) llm.value = { ...llm.value, ...llmRes.data, api_key: llmRes.data.api_key || '' }
     budget.value = bud.data?.max_run_tokens || 0
+    account.value.username = auth.username || account.value.username || 'admin'
   } catch {}
+}
+
+async function saveAccount() {
+  accountMsg.value = null
+  const name = account.value.username.trim()
+  if (!name || account.value.password.length < 6) {
+    accountMsg.value = { ok: false, text: '账号必填，新密码至少 6 位' }
+    return
+  }
+  try {
+    await api.post('/auth/change', { username: name, password: account.value.password })
+    auth.username = name
+    localStorage.setItem('dhunter_user', name)
+    account.value.password = ''
+    accountMsg.value = { ok: true, text: '登录账号已更新，下次登录请使用新凭据' }
+  } catch (e: any) {
+    accountMsg.value = { ok: false, text: e?.response?.data?.error || e?.message || '保存失败' }
+  }
 }
 
 async function testConnection() {
@@ -99,6 +150,44 @@ onMounted(load)
         </div>
         <div class="muted" style="font-size: 12px">
           保存后新建扫描会使用这个模型。兼容 OpenAI/Anthropic 协议（DeepSeek / MiniMax / Qwen / GLM / Claude…）。
+        </div>
+      </UiCard>
+
+      <UiCard title="登录账号（首次运行自动生成，可修改）">
+        <div class="form-grid">
+          <div>
+            <label class="field-label">用户名</label>
+            <input v-model="account.username" autocomplete="username" style="width: 100%" />
+          </div>
+          <div>
+            <label class="field-label">新密码（至少 6 位）</label>
+            <input v-model="account.password" type="password" autocomplete="new-password" style="width: 100%" />
+          </div>
+        </div>
+        <div class="row">
+          <UiButton variant="primary" @click="saveAccount">更新账号</UiButton>
+          <span v-if="accountMsg" :style="accountMsg.ok ? 'color: var(--ok); font-size: 13px' : 'color: var(--danger); font-size: 13px'">
+            {{ accountMsg.ok ? '✓ ' : '✕ ' }}{{ accountMsg.text }}
+          </span>
+        </div>
+        <div class="muted" style="font-size: 12px">
+          修改后登录凭据立即生效（Bearer token 不变）。遗忘密码可查看启动日志或修改 configs/dhunter.yaml 的 bootstrap_password。
+        </div>
+      </UiCard>
+
+      <UiCard title="清空数据（危险操作）">
+        <div class="muted" style="font-size: 12px; margin-bottom: 10px">
+          清空全部测试数据：目标、运行记录、对话消息、漏洞成果、先验知识。账号与 LLM 配置保留。
+        </div>
+        <div class="row">
+          <UiButton
+            variant="danger"
+            :disabled="clearing"
+            @click="clearData"
+          >{{ clearing ? '清空中…' : (clearArmed ? '再次点击确认清空' : '清空全部数据') }}</UiButton>
+          <span v-if="clearMsg" :style="clearMsg.ok ? 'color: var(--ok); font-size: 13px' : 'color: var(--danger); font-size: 13px'">
+            {{ clearMsg.ok ? '✓ ' : '✕ ' }}{{ clearMsg.text }}
+          </span>
         </div>
       </UiCard>
 

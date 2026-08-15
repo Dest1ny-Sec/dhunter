@@ -1,37 +1,40 @@
 <script setup lang="ts">
 import Sparkline from '../charts/Sparkline.vue'
+import Icon from '../icons/Icon.vue'
 
 withDefaults(defineProps<{
   label: string
   value: string | number
   icon?: string
-  iconColor?: 'violet' | 'green' | 'yellow' | 'pink'
+  iconName?: string
   sparkData?: number[]
-  showArrow?: boolean
   foot?: string
-}>(), {
-  iconColor: 'violet',
-  showArrow: true,
-})
+  /** optional accent color (hex) for the sparkline & icon glow */
+  accent?: string
+}>(), { accent: '#a78bfa' })
 
 defineEmits<{ (e: 'arrow'): void }>()
 </script>
 
 <template>
-  <div class="stat-card-glow">
-    <div class="stat-card-inner">
-      <div class="stat-card-head">
-        <div class="stat-card-icon" :class="iconColor">
-          <span>{{ icon }}</span>
-        </div>
-        <button v-if="showArrow" class="stat-card-arrow" @click="$emit('arrow')">→</button>
-      </div>
-      <div class="stat-card-label">{{ label }}</div>
-      <div class="stat-card-value">{{ value }}</div>
-      <div v-if="foot" class="stat-card-foot">{{ foot }}</div>
-      <div v-if="sparkData && sparkData.length > 1" class="spark-bg">
-        <Sparkline :data="sparkData" :width="160" :height="48" :stroke="iconColor === 'green' ? '#34d399' : iconColor === 'yellow' ? '#fbbf24' : iconColor === 'pink' ? '#f472b6' : '#a78bfa'" :fill="iconColor === 'green' ? '#10b981' : iconColor === 'yellow' ? '#f59e0b' : iconColor === 'pink' ? '#ec4899' : '#8b5cf6'" :show-last-dot="true" :fill-opacity="0.25" />
-      </div>
+  <div class="stat-hero" @click="$emit('arrow')">
+    <div v-if="iconName" class="hero-icon">
+      <Icon :name="iconName" :size="16" />
+    </div>
+    <div v-else-if="icon" class="hero-icon">{{ icon }}</div>
+    <div class="hero-label">{{ label }}</div>
+    <div class="hero-value">{{ value }}</div>
+    <div v-if="foot" class="hero-foot">{{ foot }}</div>
+    <div v-if="sparkData && sparkData.length > 1" class="hero-spark">
+      <Sparkline
+        :data="sparkData"
+        :width="220"
+        :height="80"
+        :stroke="accent"
+        :fill="accent"
+        :fill-opacity="0.18"
+        :show-last-dot="true"
+      />
     </div>
   </div>
 </template>

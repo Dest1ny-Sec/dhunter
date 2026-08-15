@@ -5,7 +5,9 @@ import { onEnter } from '../utils/ime'
 import { api } from '../api/client'
 import UiButton from '../components/ui/UiButton.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
-import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import Icon from '../components/icons/Icon.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -13,7 +15,9 @@ const route = useRoute()
 const target = ref('')
 const targetType = ref<'auto' | 'company' | 'domain' | 'url' | 'ip'>('auto')
 const projName = ref('')
+const maxWorkers = ref(0)
 const error = ref<string | null>(null)
+const delError = ref<string | null>(null)
 const loading = ref(false)
 const targets = ref<any[]>([])
 const runs = ref<any[]>([])
@@ -77,17 +81,48 @@ async function loadTargets() {
   }
 }
 
-async function start() {
-  if (!target.value.trim()) {
-    error.value = '请输入目标'
-    return
+/** Validate target by type. Returns an error message or null. */
+function validateTarget(input: string, type: string): string | null {
+  const v = input.trim()
+  if (!v) return '请输入目标'
+  if (v.length > 500) return '目标长度不能超过 500 字符'
+  switch (type) {
+    case 'url': {
+      try { new URL(v.startsWith('http') ? v : 'http://' + v) } catch { return '请输入合法的 URL，例如 https://example.com/login' }
+      return null
+    }
+    case 'domain': {
+      if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(v)) return '请输入合法的域名，例如 acme.com'
+      return null
+    }
+    case 'ip': {
+      if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) return '请输入合法的 IPv4，例如 10.0.0.1'
+      const parts = v.split('.').map(Number)
+      if (parts.some((n) => n < 0 || n > 255)) return 'IP 段超出 0-255 范围'
+      return null
+    }
+    case 'company': {
+      if (v.length < 2) return '公司名至少 2 个字'
+      return null
+    }
+    case 'auto':
+    default: {
+      if (v.length < 2) return '请输入至少 2 个字'
+      return null
+    }
   }
+}
+
+async function start() {
+  const v = validateTarget(target.value, targetType.value)
+  if (v) { error.value = v; return }
   error.value = null
   loading.value = true
   try {
     const tRes = await api.post('/targets', {
       input: target.value.trim(), type: targetType.value,
       name: projName.value.trim(),
+      max_workers: Number(maxWorkers.value) || 0,
     })
     const targetId = tRes.data?.id
     if (!targetId) throw new Error('No target id returned')
@@ -115,7 +150,7 @@ async function start() {
     await loadTargets()
     router.push(`/runs/${runId}`)
   } catch (e: any) {
-    error.value = e?.response?.data?.error || e?.message || 'Failed to start'
+    error.value = e?.response?.data?.error || e?.message || '启动失败'
   } finally {
     loading.value = false
   }
@@ -154,15 +189,20 @@ function newRun(t: any) {
 
 async function removeTarget(t: any) {
   if (!confirm(`确定删除项目「${t.name || t.value || t.id}」？该项目所有扫描记录、漏洞成果和攻击链都会被删除。`)) return
+  delError.value = null
   try {
     await api.delete(`/targets/${t.id}`)
     await loadTargets()
   } catch (e: any) {
-    alert('删除失败: ' + (e?.response?.data?.error || e?.message))
+    delError.value = e?.response?.data?.error || e?.message || '未知错误'
   }
 }
 function viewRuns(t: any) {
   router.push(`/targets/${t.id}/runs`)
+}
+function exportReport(t: any) {
+  const token = localStorage.getItem('dhunter_token') || ''
+  window.open(`/api/targets/${t.id}/report?token=${encodeURIComponent(token)}`, '_blank')
 }
 
 onMounted(() => {
@@ -179,7 +219,11 @@ onMounted(() => {
         <h2 style="font-size: 20px; font-weight: 600; margin: 0">授权目标</h2>
         <div class="muted" style="font-size: 13px; margin-top: 2px">已授权 AI 进行侦察和测试的目标资产</div>
       </div>
-      <UiButton variant="primary" size="md" @click="showForm = !showForm">{{ showForm ? '收起' : '＋ 新建目标' }}</UiButton>
+      <UiButton variant="primary" size="md" @click="showForm = !showForm">
+        <Icon v-if="!showForm" name="plus" :size="14" />
+        <Icon v-else name="close" :size="14" />
+        <span style="margin-left: 6px">{{ showForm ? '收起' : '新建目标' }}</span>
+      </UiButton>
     </div>
 
     <div v-if="showForm" class="card create-form">
@@ -201,6 +245,10 @@ onMounted(() => {
             <option value="url">URL</option>
             <option value="ip">IP</option>
           </select>
+        </div>
+        <div>
+          <label class="field-label">并发 worker 数（可选，0=平台默认）</label>
+          <input v-model.number="maxWorkers" type="number" min="0" max="16" placeholder="0" style="width: 100%" />
         </div>
       </div>
       <div>
@@ -243,15 +291,27 @@ onMounted(() => {
         <textarea v-model="redLines" rows="2" style="width: 100%; font-size: 12.5px"
           placeholder="例如：禁止爆破/高频请求&#10;只在授权范围测试&#10;不测试支付/资金相关接口&#10;发现任何涉及用户数据的问题立即停止并上报" />
       </div>
-      <div v-if="error" style="color: var(--danger); font-size: 13px">{{ error }}</div>
+      <div v-if="error" class="form-error">
+        <Icon name="alert" :size="14" />
+        <span>{{ error }}</span>
+      </div>
       <div class="row">
         <UiButton variant="primary" size="lg" :disabled="loading" @click="start">
-          {{ loading ? '启动中…' : '启动评估' }}
+          <Icon name="play" :size="14" />
+          <span style="margin-left: 6px">{{ loading ? '启动中…' : '启动评估' }}</span>
         </UiButton>
       </div>
     </div>
 
-    <div v-if="targetsLoading" class="muted">Loading…</div>
+    <div v-if="delError" class="card" style="padding: 12px 14px; border-color: var(--danger); margin-bottom: 12px">
+      <span style="color: var(--danger); font-size: 13px">✕ 删除失败：{{ delError }}</span>
+    </div>
+
+    <div v-if="targetsLoading" class="card" style="padding: 18px">
+      <div class="sk-grid">
+        <UiSkeleton v-for="i in 4" :key="i" block height="156px" radius="12px" />
+      </div>
+    </div>
     <div v-else-if="targets.length" class="eng-grid">
       <div v-for="t in targets" :key="t.id" class="eng-card card">
         <div class="eng-card-head">
@@ -264,34 +324,86 @@ onMounted(() => {
         <div v-if="t.name && t.name !== t.value" class="muted" style="font-size: 12px">{{ t.value || t.normalized }}</div>
         <div class="eng-card-meta muted">{{ (sevByTarget[t.id] ? Object.entries(sevByTarget[t.id]).map(([s, c]) => `${s} ${c}`).join(' · ') : '暂无发现') }}</div>
         <div class="eng-card-foot">
-          <UiBadge v-if="lastRun[t.id]" kind="status" :value="lastRun[t.id].status" :dot="true" />
-          <span v-else class="muted" style="font-size: 11px">暂无运行</span>
-          <span class="muted" style="font-size: 11px">{{ runCounts[t.id] || 0 }} 次运行</span>
-          <span class="spacer" />
-          <button class="ghost" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="newRun(t)">新建运行</button>
-          <button class="ghost" style="min-height: 28px; padding: 0 8px; font-size: 12px; color: var(--danger)" @click="removeTarget(t)">删除</button>
-          <button style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="viewRuns(t)">历史</button>
+          <div class="eng-card-foot-info">
+            <UiBadge v-if="lastRun[t.id]" kind="status" :value="lastRun[t.id].status" :dot="true" />
+            <span v-else class="muted" style="font-size: 11px">暂无运行</span>
+            <span class="muted" style="font-size: 11px">{{ runCounts[t.id] || 0 }} 次运行</span>
+          </div>
+          <div class="eng-card-foot-actions">
+            <button class="ghost" @click="newRun(t)">新建运行</button>
+            <button @click="viewRuns(t)">历史</button>
+            <button @click="exportReport(t)">导出报告</button>
+            <button class="ghost danger-text" @click="removeTarget(t)" :aria-label="'删除项目 ' + (t.name || t.value)">删除</button>
+          </div>
         </div>
       </div>
     </div>
-    <UiEmpty v-else-if="!targetsLoading" icon="◈" message="暂无授权目标，点击右上角新建第一个" />
+    <div v-else-if="!showForm" class="card" style="padding: 0">
+      <EmptyState
+        icon="target"
+        title="还没有授权目标"
+        description="填入一个公司名、域名、URL 或 IP，AI 会自动识别类型并启动一次侦察评估。所有目标的扫描进度、漏洞成果、攻击链都会在这里汇总。"
+        primary-label="新建第一个目标"
+        @primary="showForm = true"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .eng-head { display: flex; justify-content: space-between; align-items: flex-start; }
 .create-form { display: flex; flex-direction: column; gap: 14px; }
-.form-grid { display: grid; grid-template-columns: 1fr 220px; gap: 12px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr 220px; gap: 12px; }
 .field-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
-.auth-details summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.auth-details summary { cursor: pointer; font-size: 13px; color: var(--stellar-bright); }
 .auth-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
 .eng-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .eng-card { display: flex; flex-direction: column; gap: 8px; transition: border-color 0.15s, transform 0.15s; }
-.eng-card:hover { border-color: var(--text-faint); transform: translateY(-1px); }
+.eng-card:hover { border-color: var(--border-bright); transform: translateY(-2px); box-shadow: 0 6px 24px rgba(125, 146, 232, 0.12); }
 .eng-card-head { display: flex; align-items: center; gap: 8px; }
 .eng-card-value { font-size: 14px; font-weight: 600; cursor: pointer; word-break: break-all; }
-.eng-card-value:hover { color: var(--accent); }
+.eng-card-value:hover { color: var(--stellar-bright); }
 .eng-card-meta { font-size: 12px; }
-.eng-card-foot { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+.eng-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.eng-card-foot-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 11.5px;
+}
+.eng-card-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.eng-card-foot-actions button {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.eng-card-foot-actions .danger-text { color: var(--danger); }
+.sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.form-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  background: rgba(226, 100, 114, 0.08);
+  border: 1px solid rgba(226, 100, 114, 0.28);
+  border-radius: var(--radius-sm);
+  color: var(--sev-critical);
+  font-size: 12.5px;
+}
 @media (max-width: 900px) { .form-grid, .auth-fields { grid-template-columns: 1fr; } }
 </style>
