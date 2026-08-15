@@ -67,10 +67,12 @@ class RunManager:
         try:
             await asyncio.wait_for(self._loop(), timeout=OVERALL_TIMEOUT)
         except asyncio.TimeoutError:
-            self.run.status = "failed"
-            self.run.error = f"overall timeout ({int(OVERALL_TIMEOUT)}s) exceeded"
-            log.warning("run %s timed out after %ss", self.run.run_id, int(OVERALL_TIMEOUT))
-            await self.run.emit("run_done", {"status": "failed", "error": self.run.error})
+            # Reached the time-based run limit — stop gracefully, not as a failure.
+            mins = int(OVERALL_TIMEOUT / 60)
+            self.run.status = "success"
+            self.run.summary = f"达到运行时间上限（{mins} 分钟），已自动停止。可点击「继续深入」从当前进度续跑。"
+            log.warning("run %s reached %s-min time limit", self.run.run_id, mins)
+            await self.run.emit("run_done", {"status": "success", "summary": self.run.summary})
         except asyncio.CancelledError:
             self.run.status = "cancelled"
             self.run.error = "run cancelled"
@@ -108,11 +110,7 @@ class RunManager:
         converged = False
         while time.monotonic() - self.started < OVERALL_TIMEOUT:
             graph = await self.board.graph(self.run.run_id)
-            # token budget red line
-            if await self._budget_exhausted(graph):
-                self.run.summary = f"token budget red line reached ({self.max_run_tokens} tokens)"
-                log.warning("run %s: token budget red line reached (%s)", self.run.run_id, self.max_run_tokens)
-                break
+            # time-based run limit is the only stop mechanism (see OVERALL_TIMEOUT)
             open_its = [i for i in (graph.get("intents") or []) if i.get("status") == "open"]
 
             # reap finished workers

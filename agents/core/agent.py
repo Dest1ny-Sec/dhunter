@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 # Timeouts are env-tunable. The Go bridge holds the stream open for
 # OVERALL_TIMEOUT + 10m, so keep OVERALL_TIMEOUT below the bridge deadline.
-OVERALL_TIMEOUT = float(os.environ.get("DHUNTER_AGENT_OVERALL_TIMEOUT", "3600"))  # default 1h
+OVERALL_TIMEOUT = float(os.environ.get("DHUNTER_AGENT_OVERALL_TIMEOUT", "1800"))  # default 30 min (time-based run limit)
 STEP_TIMEOUT = float(os.environ.get("DHUNTER_AGENT_STEP_TIMEOUT", "120"))          # default 120s per LLM turn
 MAX_ITERATIONS = int(os.environ.get("DHUNTER_AGENT_MAX_ITERATIONS", "40"))         # tool-loop cap per worker
 MAX_TOOL_RESULT_CHARS = 20_000  # truncate huge tool outputs before the next LLM turn
