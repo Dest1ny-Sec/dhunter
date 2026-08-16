@@ -61,6 +61,9 @@ class RunManager:
         self.dispatching: set[str] = set()  # intent ids handed to a worker
         self.reason_rounds = 0
         self.started = time.monotonic()
+        # Fact ids the planner has already seen — enables incremental reason
+        # turns (only NEW facts are re-sent, see _reason_once).
+        self._known_fact_ids: set[str] = set()
         self.run_auth: dict[str, Any] | None = None
         self.max_run_tokens = 0
         self.llm_config: dict[str, Any] | None = None
@@ -438,7 +441,17 @@ class RunManager:
             log.info("run %s: reason round cap (%s) reached, converging", self.run.run_id, MAX_REASON_ROUNDS)
             return "noop"
         log.info("run %s: reason round %s", self.run.run_id, self.reason_rounds)
-        kind, payload = await run_reason_step(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
+        # Incremental planning: the first reason turn sees ALL facts; later
+        # turns only see NEW facts since the last reason step (saves tokens
+        # on the re-sent summary). The known set is updated from the same
+        # graph snapshot we reason over.
+        kind, payload = await run_reason_step(
+            self.run, self.board, self.system_prompt, llm_config=self.llm_config,
+            known_fact_ids=self._known_fact_ids,
+        )
+        for f in (graph.get("facts") or []):
+            if f.get("id"):
+                self._known_fact_ids.add(f["id"])
         if kind == "intents":
             log.info("run %s: reason proposed %s new intents", self.run.run_id, payload)
             return "intents"

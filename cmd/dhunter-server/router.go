@@ -48,6 +48,7 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 		api.GET("/targets/:id", targetH.Get)
 		api.PATCH("/targets/:id/auth", targetH.SetAuth)
 		api.PATCH("/targets/:id/redlines", targetH.SetRedLines)
+		api.PATCH("/targets/:id/favorite", targetH.SetFavorite)
 		api.DELETE("/targets/:id", targetH.Delete)
 
 		runH := handler.NewRunHandler(stores, bridge, hub)

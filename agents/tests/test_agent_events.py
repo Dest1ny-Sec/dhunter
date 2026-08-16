@@ -76,3 +76,62 @@ def test_tool_call_and_result_share_call_id(monkeypatch):
     # The tool was actually executed (input args are empty here because the
     # mock omits input_json_delta deltas; the call itself is what matters).
     assert reg.calls and reg.calls[0][0] == "http_request", reg.calls
+
+
+def test_compact_messages_collapses_old_rounds():
+    """Beyond the round threshold, the oldest turns collapse into a compact
+    summary merged into the initial user message; roles stay alternating and
+    the LATEST turn is preserved fully."""
+    from core.agent import _compact_messages
+
+    msgs = [{"role": "user", "content": "start"}]
+    for i in range(5):
+        msgs.append({"role": "assistant", "content": [
+            {"type": "tool_use", "id": f"call_{i}", "name": "http_request", "input": {"url": f"https://x/{i}"}},
+        ]})
+        msgs.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": f"call_{i}", "content": f"resp {i}", "is_error": False},
+        ]})
+
+    out = _compact_messages(msgs, max_rounds=2, keep_rounds=1)
+    # initial user (with merged summary) + 1 kept round = 3 entries
+    assert len(out) == 3, [m["role"] for m in out]
+    assert "已压缩" in out[0]["content"]
+    assert "http_request" in out[0]["content"]  # summary mentions the tool
+    assert "→ ok" in out[0]["content"]
+    # roles must stay user/assistant alternating (Anthropic constraint)
+    assert [m["role"] for m in out] == ["user", "assistant", "user"], [m["role"] for m in out]
+    # the kept round is the LATEST one, intact
+    kept_result = out[2]["content"][0]
+    assert kept_result["content"] == "resp 4", kept_result
+
+
+def test_compact_messages_noop_below_threshold():
+    """Ordinary runs (under the threshold) are untouched — prompt cache intact."""
+    from core.agent import _compact_messages
+
+    msgs = [{"role": "user", "content": "start"}]
+    for i in range(2):
+        msgs.append({"role": "assistant", "content": [{"type": "text", "text": f"t{i}"}]})
+        msgs.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"c{i}", "content": f"r{i}", "is_error": False}]})
+    out = _compact_messages(msgs, max_rounds=5, keep_rounds=1)
+    assert out == msgs
+
+
+def test_render_graph_summary_incremental_facts():
+    """The planner sees only NEW facts once known_fact_ids is provided —
+    known facts stop being re-paid every reason turn."""
+    from core.agent import render_graph_summary
+
+    graph = {
+        "facts": [{"id": "f1", "description": "known endpoint"}, {"id": "f2", "description": "fresh finding"}],
+        "intents": [],
+        "hints": [],
+    }
+    full = render_graph_summary(graph)
+    assert "2)" in full  # total count shown without a known set
+
+    inc = render_graph_summary(graph, known_fact_ids={"f1"})
+    assert "1 new since last planning" in inc, inc
+    assert "f1" not in inc  # known fact omitted
+    assert "f2" in inc  # new fact included

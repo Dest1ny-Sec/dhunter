@@ -10,6 +10,7 @@ import AreaChart from '../components/charts/AreaChart.vue'
 import Icon from '../components/icons/Icon.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import OnboardingModal from '../components/OnboardingModal.vue'
 
 const router = useRouter()
 
@@ -138,9 +139,17 @@ async function loadData() {
   }
 }
 
-onMounted(() => {
-  loadData()
+// First-run onboarding: show the 3-step guide until the user completes or
+// skips it, and only while the board is still basically empty.
+const showOnboarding = ref(false)
+function closeOnboarding() { showOnboarding.value = false }
+
+onMounted(async () => {
+  await loadData()
   refreshTimer = window.setInterval(loadData, 30_000)
+  if (!localStorage.getItem('dhunter_onboarded') && (targets.value.length === 0 || !llmReady.value)) {
+    showOnboarding.value = true
+  }
 })
 onBeforeUnmount(() => {
   if (refreshTimer) window.clearInterval(refreshTimer)
@@ -149,6 +158,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="dashboard col">
+    <OnboardingModal :open="showOnboarding" @close="closeOnboarding" />
     <!-- LLM 未配置引导横幅 -->
     <div v-if="!llmReady" class="llm-warn card" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-color:var(--warning);margin-bottom:14px">
       <span>⚠️</span>

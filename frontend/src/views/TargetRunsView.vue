@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { hasUsableAuth } from '../utils/authContext'
+import SeverityBadge from '../components/SeverityBadge.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -71,6 +72,56 @@ function openRun(r: any) {
   router.push(`/runs/${r.id}`)
 }
 
+// --- 报告版本对比：选两个 run，看漏洞差集（新增 / 消失 / 相同） ---
+const compareIds = ref<string[]>([])
+const comparing = ref(false)
+const compareResult = ref<{
+  a: { id: string; started_at?: string }
+  b: { id: string; started_at?: string }
+  added: any[]
+  removed: any[]
+  same: any[]
+} | null>(null)
+
+function toggleCompare(r: any) {
+  if (compareIds.value.includes(r.id)) {
+    compareIds.value = compareIds.value.filter((id) => id !== r.id)
+  } else if (compareIds.value.length < 2) {
+    compareIds.value = [...compareIds.value, r.id]
+  }
+  compareResult.value = null
+}
+
+function vulnKey(v: any): string {
+  return `${(v.title || '').trim().toLowerCase()}::${(v.target || '').trim().toLowerCase()}`
+}
+
+async function runCompare() {
+  if (compareIds.value.length !== 2) return
+  comparing.value = true
+  compareResult.value = null
+  try {
+    const [r1, r2] = await Promise.all(
+      compareIds.value.map((id) => api.get(`/runs/${id}/vulnerabilities`)),
+    )
+    const va = ((r1.data?.vulnerabilities || []) as any[]).filter((v) => v.status !== 'dismissed')
+    const vb = ((r2.data?.vulnerabilities || []) as any[]).filter((v) => v.status !== 'dismissed')
+    const ka = new Set(va.map(vulnKey))
+    const kb = new Set(vb.map(vulnKey))
+    compareResult.value = {
+      a: { id: compareIds.value[0], started_at: runs.value.find((r) => r.id === compareIds.value[0])?.started_at },
+      b: { id: compareIds.value[1], started_at: runs.value.find((r) => r.id === compareIds.value[1])?.started_at },
+      added: vb.filter((v) => !ka.has(vulnKey(v))),
+      removed: va.filter((v) => !kb.has(vulnKey(v))),
+      same: vb.filter((v) => ka.has(vulnKey(v))),
+    }
+  } catch (e: any) {
+    error.value = e?.response?.data?.error || e?.message || '对比失败'
+  } finally {
+    comparing.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -91,8 +142,11 @@ onMounted(load)
 
     <div v-if="error" style="color: var(--danger)">{{ error }}</div>
     <div v-else-if="runs.length" class="session-list">
-      <div v-for="r in runs" :key="r.id" class="session-item card" @click="openRun(r)">
+      <div v-for="r in runs" :key="r.id" class="session-item card" :class="{ 'cmp-selected': compareIds.includes(r.id) }" @click="openRun(r)">
         <div class="session-left">
+          <label class="cmp-check" @click.stop title="选择用于对比（最多 2 个）">
+            <input type="checkbox" :checked="compareIds.includes(r.id)" :disabled="!compareIds.includes(r.id) && compareIds.length >= 2" @change="toggleCompare(r)" />
+          </label>
           <UiBadge kind="status" :value="r.status" :dot="true" />
           <div class="session-meta">
             <div class="session-id">会话 <code>{{ r.id.slice(0, 8) }}</code> · {{ fmtTime(r.started_at) }}</div>
@@ -104,6 +158,48 @@ onMounted(load)
           <span class="muted" style="font-size: 12px">{{ duration(r) }} · {{ fmtN((r.input_tokens||0)+(r.output_tokens||0)) }} tok</span>
           <UiButton size="sm" variant="secondary" @click.stop="openRun(r)">查看攻击链 →</UiButton>
         </div>
+      </div>
+      <div v-if="compareIds.length" class="row" style="gap: 10px">
+        <UiButton variant="primary" :disabled="compareIds.length !== 2 || comparing" @click="runCompare">
+          {{ comparing ? '对比中…' : `对比选中的 ${compareIds.length}/2 次评估` }}
+        </UiButton>
+        <button class="ghost" @click="compareIds = []; compareResult = null">取消</button>
+      </div>
+    </div>
+
+    <!-- 版本对比结果：两次评估的漏洞差集 -->
+    <div v-if="compareResult" class="card cmp-result">
+      <h3 style="font-size: 14px; font-weight: 600; margin: 0 0 10px">版本对比</h3>
+      <div class="cmp-line added">🆕 本次新增（{{ compareResult.added.length }}）</div>
+      <div v-if="compareResult.added.length" class="cmp-list">
+        <div v-for="(v, i) in compareResult.added" :key="i" class="cmp-row">
+          <SeverityBadge :severity="v.severity || 'info'" />
+          <span class="cmp-title">{{ v.title }}</span>
+          <code class="muted" style="font-size: 11px">{{ v.target || '' }}</code>
+        </div>
+      </div>
+      <div v-else class="muted" style="font-size: 12px; margin: 4px 0 10px">无</div>
+      <div class="cmp-line removed">🗑 已消失（{{ compareResult.removed.length }}）</div>
+      <div v-if="compareResult.removed.length" class="cmp-list">
+        <div v-for="(v, i) in compareResult.removed" :key="i" class="cmp-row">
+          <SeverityBadge :severity="v.severity || 'info'" />
+          <span class="cmp-title">{{ v.title }}</span>
+          <code class="muted" style="font-size: 11px">{{ v.target || '' }}</code>
+        </div>
+      </div>
+      <div v-else class="muted" style="font-size: 12px; margin: 4px 0 10px">无</div>
+      <div class="cmp-line same">＝ 两次均有（{{ compareResult.same.length }}）</div>
+      <div v-if="compareResult.same.length" class="cmp-list">
+        <div v-for="(v, i) in compareResult.same" :key="i" class="cmp-row">
+          <SeverityBadge :severity="v.severity || 'info'" />
+          <span class="cmp-title">{{ v.title }}</span>
+          <code class="muted" style="font-size: 11px">{{ v.target || '' }}</code>
+        </div>
+      </div>
+      <div v-else class="muted" style="font-size: 12px; margin: 4px 0 10px">无</div>
+      <div class="muted" style="font-size: 11px; margin-top: 8px">
+        对比 <code>{{ compareResult.a.id.slice(0, 8) }}</code>（{{ compareResult.a.started_at ? fmtTime(compareResult.a.started_at) : '—' }}）→
+        <code>{{ compareResult.b.id.slice(0, 8) }}</code>（{{ compareResult.b.started_at ? fmtTime(compareResult.b.started_at) : '—' }}），已忽略 dismissed 记录
       </div>
     </div>
     <UiEmpty v-else-if="!loading" icon="◇" message="该项目还没有评估记录，点击右上角发起一次" />
@@ -124,4 +220,15 @@ onMounted(load)
 .session-id { font-size: 13px; font-weight: 500; }
 .session-summary { font-size: 12px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px; }
 .session-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.cmp-check { display: inline-flex; align-items: center; cursor: pointer; }
+.cmp-check input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.session-item.cmp-selected { border-color: var(--accent); }
+.cmp-result { margin-top: 14px; }
+.cmp-line { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
+.cmp-line.added { color: var(--ok); }
+.cmp-line.removed { color: var(--danger); }
+.cmp-line.same { color: var(--text-dim); }
+.cmp-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.cmp-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.cmp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

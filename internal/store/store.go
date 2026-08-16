@@ -39,6 +39,8 @@ type Target struct {
 	RedLines  string    `json:"red_lines,omitempty"`
 	// Name is an optional human-friendly project name (falls back to Value).
 	Name      string    `json:"name,omitempty"`
+	// Favorite pins the target to the top of lists (user's starred targets).
+	Favorite  bool      `json:"favorite"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -263,18 +265,18 @@ func (s *TargetStore) Delete(ctx context.Context, id string) error {
 // Get fetches a target by ID.
 func (s *TargetStore) Get(ctx context.Context, id string) (*Target, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, created_at FROM targets WHERE id = ?`, id)
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, created_at FROM targets WHERE id = ?`, id)
 	return scanTarget(row)
 }
 
-// List returns the most-recently-created targets, newest first.
+// List returns the most-recently-created targets, favorites pinned first.
 func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, created_at FROM targets
-		 ORDER BY created_at DESC LIMIT ?`, limit)
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, created_at FROM targets
+		 ORDER BY favorite DESC, created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -290,6 +292,22 @@ func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 	return out, rows.Err()
 }
 
+// SetFavorite pins (or unpins) a target so it sorts to the top of lists.
+func (s *TargetStore) SetFavorite(ctx context.Context, id string, favorite bool) error {
+	v := 0
+	if favorite {
+		v = 1
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE targets SET favorite = ? WHERE id = ?`, v, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -297,14 +315,16 @@ type rowScanner interface {
 func scanTarget(r rowScanner) (*Target, error) {
 	var t Target
 	var attrs string
+	var favorite int
 	var createdMs int64
-	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &t.Name, &createdMs); err != nil {
+	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &t.Name, &favorite, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 	t.Attributes = json.RawMessage(attrs)
+	t.Favorite = favorite != 0
 	t.CreatedAt = time.UnixMilli(createdMs).UTC()
 	return &t, nil
 }

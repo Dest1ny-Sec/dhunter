@@ -216,6 +216,16 @@ async function removeTarget(t: any) {
 function viewRuns(t: any) {
   router.push(`/targets/${t.id}/runs`)
 }
+
+/** Pin/unpin a target (backend sorts favorites first). */
+async function toggleFavorite(t: any) {
+  try {
+    await api.patch(`/targets/${t.id}/favorite`, { favorite: !t.favorite })
+    await loadTargets() // backend re-sorts favorites to the top
+  } catch (e: any) {
+    delError.value = e?.response?.data?.error || e?.message || '收藏失败'
+  }
+}
 function exportReport(t: any) {
   const token = localStorage.getItem('dhunter_token') || ''
   window.open(`/api/targets/${t.id}/report?token=${encodeURIComponent(token)}`, '_blank')
@@ -391,6 +401,8 @@ onMounted(() => {
           <span class="pill">{{ t.type || 'auto' }}</span>
           <span v-if="hasAuth(t)" class="pill confirmed" title="已配置身份会话">已授权会话</span>
           <span class="spacer" />
+          <button class="star-btn" :class="{ on: t.favorite }" @click="toggleFavorite(t)"
+            :title="t.favorite ? '取消收藏' : '收藏（置顶）'" :aria-label="t.favorite ? '取消收藏' : '收藏'">★</button>
           <span class="muted" style="font-size: 11px">{{ t.created_at ? new Date(t.created_at).toLocaleDateString() : '' }}</span>
         </div>
         <div class="eng-card-value" @click="viewRuns(t)">{{ t.name || t.value || t.normalized || t.id }}</div>
@@ -435,6 +447,13 @@ onMounted(() => {
 .eng-card { display: flex; flex-direction: column; gap: 8px; transition: border-color 0.15s, transform 0.15s; }
 .eng-card:hover { border-color: var(--border-bright); transform: translateY(-2px); box-shadow: 0 6px 24px rgba(125, 146, 232, 0.12); }
 .eng-card-head { display: flex; align-items: center; gap: 8px; }
+.star-btn {
+  background: transparent; border: none; color: var(--text-faint);
+  font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 4px;
+  transition: color 0.15s, transform 0.15s;
+}
+.star-btn:hover { color: var(--warn); transform: scale(1.15); }
+.star-btn.on { color: var(--warn); }
 .eng-card-value { font-size: 14px; font-weight: 600; cursor: pointer; word-break: break-all; }
 .eng-card-value:hover { color: var(--stellar-bright); }
 .eng-card-meta { font-size: 12px; }

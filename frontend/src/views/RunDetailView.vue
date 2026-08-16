@@ -36,6 +36,7 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import Icon from '../components/icons/Icon.vue'
 import { api } from '../api/client'
+import { notify, requestNotifyPermission } from '../utils/notify'
 import { estimateCostCNY, fmtCostCNY } from '../utils/cost'
 
 const router = useRouter()
@@ -211,6 +212,10 @@ function connectSSE() {
         const st = ev.data?.run_status || ev.data?.status
         if (st) status.value = st
         if (sseRef.value) { sseRef.value.close(); sseRef.value = null }
+        // Desktop notification when the run finishes (permission requested
+        // on page mount), so the user doesn't have to stare at the tab.
+        const label = st === 'success' || st === 'completed' ? '运行完成' : st === 'failed' ? '运行失败' : `运行结束（${st}）`
+        notify(label, (ev.data?.content || ev.data?.summary || runInfo.value?.summary || '').slice(0, 120) || undefined)
       }
       if (ev.type === 'run_complete' || ev.type === 'run_finished') {
         status.value = 'completed'
@@ -233,6 +238,7 @@ function connectSSE() {
 }
 
 onMounted(async () => {
+  requestNotifyPermission() // ask once; used when the run finishes
   await loadRun()
   connectSSE()
   loadTools()

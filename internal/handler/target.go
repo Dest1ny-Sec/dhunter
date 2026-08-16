@@ -185,6 +185,28 @@ func (h *TargetHandler) SetAuth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
 }
 
+// SetFavorite handles PATCH /api/targets/:id/favorite — pins/unpins a
+// target so it sorts to the top of target lists.
+func (h *TargetHandler) SetFavorite(c *gin.Context) {
+	id := c.Param("id")
+	var body struct {
+		Favorite bool `json:"favorite"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	if err := h.Stores.Targets.SetFavorite(c.Request.Context(), id, body.Favorite); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id, "favorite": body.Favorite})
+}
+
 // SetRedLines handles PATCH /api/targets/:id/redlines.
 func (h *TargetHandler) SetRedLines(c *gin.Context) {
 	id := c.Param("id")

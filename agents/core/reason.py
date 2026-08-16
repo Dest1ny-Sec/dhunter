@@ -35,19 +35,24 @@ async def run_reason_step(
     *,
     max_intents: int = MAX_REASON_INTENTS,
     llm_config: dict[str, Any] | None = None,
+    known_fact_ids: set[str] | None = None,
 ) -> tuple[str, Any]:
-    """One reason turn. Returns (kind, payload)."""
+    """One reason turn. Returns (kind, payload).
+
+    `known_fact_ids` (the planner's previous view) enables INCREMENTAL
+    planning: only facts the planner has not seen are listed, so each reason
+    turn stops re-paying tokens for facts it already knows."""
     graph = await board.graph(run.run_id)
     template = _load_prompt("reason.md")
     user_content = render_template(
         template,
         origin=run.target,
         goal=run.objective,
-        graph_summary=render_graph_summary(graph),
+        graph_summary=render_graph_summary(graph, known_fact_ids=known_fact_ids),
         max_intents=str(max_intents),
     ) if template else (
         f"Target: {run.target}\nGoal: {run.objective}\n\n"
-        f"{render_graph_summary(graph)}\n\n"
+        f"{render_graph_summary(graph, known_fact_ids=known_fact_ids)}\n\n"
         f"Return JSON: {{'kind': 'intents'|'noop'|'complete', ...}} at most {max_intents} intents."
     )
 

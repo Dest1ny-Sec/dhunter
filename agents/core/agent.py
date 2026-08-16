@@ -40,6 +40,25 @@ MAX_ITERATIONS = int(os.environ.get("DHUNTER_AGENT_MAX_ITERATIONS", "40"))      
 # agents that need more re-issue a targeted request.
 MAX_TOOL_RESULT_CHARS = 8_000  # truncate huge tool outputs before the next LLM turn
 
+# --- context compaction (sliding window) -----------------------------------
+#
+# The tool loop re-sends the WHOLE message history every turn, so a long run
+# grows the context without bound. When the number of turns exceeds
+# MAX_CONTEXT_ROUNDS, the oldest turns are collapsed into a compact summary
+# (one line per tool call) merged into the initial user message, keeping only
+# the most recent _COMPACT_KEEP_ROUNDS turns fully intact. This caps the
+# context for 30-minute runs at the cost of one prompt-cache miss when the
+# prefix changes — ordinary runs (≤ MAX_CONTEXT_ROUNDS turns) never trigger
+# it, so their cache stays intact.
+#
+# NOTE on "keep only recent thinking": Anthropic-style reasoning blocks must
+# be echoed back verbatim WITH their signature (an altered thinking text
+# fails signature validation), so thinking cannot be trimmed in place. The
+# sliding window achieves the same goal safely: whole old turns — including
+# their thinking blocks — are dropped together.
+MAX_CONTEXT_ROUNDS = int(os.environ.get("DHUNTER_MAX_CONTEXT_ROUNDS", "20"))
+_COMPACT_KEEP_ROUNDS = 12
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -77,6 +96,64 @@ class AgentRun:
 
 
 # --- LLM + tool loop -----------------------------------------------------
+
+
+def _summarize_turn(assistant: dict[str, Any], tool_user: dict[str, Any]) -> str:
+    """One compact line per tool call in a dropped turn:
+    `· tool_name(args) → ok|error`. Pairs tool_use blocks (assistant
+    message) with their tool_results (next user message) by tool_use_id."""
+    result_map: dict[str, dict[str, Any]] = {}
+    for rb in tool_user.get("content") or []:
+        if isinstance(rb, dict) and rb.get("type") == "tool_result":
+            result_map[str(rb.get("tool_use_id") or "")] = rb
+    lines: list[str] = []
+    for b in assistant.get("content") or []:
+        if not isinstance(b, dict) or b.get("type") != "tool_use":
+            continue
+        name = str(b.get("name") or "?")
+        args = json.dumps(b.get("input") or {}, ensure_ascii=False)
+        if len(args) > 100:
+            args = args[:100] + "…"
+        rr = result_map.get(str(b.get("id") or "")) or {}
+        status = "error" if rr.get("is_error") else "ok"
+        lines.append(f"· {name}({args}) → {status}")
+    return "\n".join(lines)
+
+
+def _compact_messages(
+    messages: list[dict[str, Any]],
+    max_rounds: int = MAX_CONTEXT_ROUNDS,
+    keep_rounds: int = _COMPACT_KEEP_ROUNDS,
+) -> list[dict[str, Any]]:
+    """Slide the context window: when the turn count exceeds `max_rounds`,
+    collapse the oldest turns into a compact summary merged into the initial
+    user message, keeping only the most recent `keep_rounds` turns fully
+    intact. Message roles stay alternating (user/assistant), so the request
+    remains valid for Anthropic and compat endpoints."""
+    if len(messages) < 3:
+        return messages
+    rounds = (len(messages) - 1) // 2  # entries beyond the initial user form user/assistant pairs
+    if rounds <= max_rounds:
+        return messages
+    keep = max(1, min(keep_rounds, rounds))
+    drop = (rounds - keep) * 2
+    dropped = messages[1 : 1 + drop]
+    kept = messages[1 + drop :]
+
+    lines: list[str] = []
+    for i in range(0, len(dropped), 2):
+        asst = dropped[i]
+        tuser = dropped[i + 1] if i + 1 < len(dropped) else {}
+        line = _summarize_turn(asst, tuser)
+        if line:
+            lines.append(line)
+    summary_text = (
+        "（以下为早期轮次的工具活动摘要，已压缩以节省上下文）\n"
+        + ("\n".join(lines) if lines else "（早期轮次无工具调用）")
+    )
+    head = dict(messages[0])
+    head["content"] = str(head.get("content") or "") + "\n\n" + summary_text
+    return [head] + kept
 
 
 async def run_tool_loop(
@@ -209,6 +286,9 @@ async def run_tool_loop(
             tool_result_blocks.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content_str, "is_error": bool(result.get("is_error"))})
 
         messages.append({"role": "user", "content": tool_result_blocks})
+        # Sliding window: keep the context bounded on long runs (see the
+        # compaction docstring above).
+        messages = _compact_messages(messages)
 
     summary = "\n\n".join(p for p in final_text_parts if p).strip() or "(no final summary text produced)"
     return summary
@@ -310,25 +390,41 @@ def parse_json_object(text: str) -> dict[str, Any]:
 REASON_MAX_FACTS = int(os.environ.get("DHUNTER_REASON_MAX_FACTS", "40"))
 
 
-def render_graph_summary(graph: dict[str, Any], max_facts: int = REASON_MAX_FACTS) -> str:
+def render_graph_summary(graph: dict[str, Any], max_facts: int = REASON_MAX_FACTS, known_fact_ids: set[str] | None = None) -> str:
     """Compact, token-cheap rendering of the board for LLM prompts.
     Facts are one line each; open intents and hints are listed. The full
-    graph lives in the backend — this is the *summary* fed to the model."""
+    graph lives in the backend — this is the *summary* fed to the model.
+
+    `known_fact_ids` (the planner's previous view) enables INCREMENTAL
+    planning: only facts the planner has not seen yet are listed, so each
+    reason turn stops re-paying tokens for facts it already knows."""
     lines: list[str] = []
     facts = graph.get("facts") or []
     intents = graph.get("intents") or []
     hints = graph.get("hints") or []
 
-    lines.append(f"## Confirmed facts ({len(facts)})")
-    recent = facts[-max_facts:]
-    dropped = len(facts) - len(recent)
-    if dropped > 0:
-        lines.append(f"(showing the latest {len(recent)} of {len(facts)} facts)")
-    for i, f in enumerate(recent):
-        desc = (f.get("description") or "").strip().replace("\n", " ")
-        if len(desc) > 140:
-            desc = desc[:140] + "…"
-        lines.append(f"- {f.get('id', '?')}: {desc}")
+    if known_fact_ids:
+        new_facts = [f for f in facts if f.get("id") not in known_fact_ids]
+        lines.append(f"## Confirmed facts ({len(facts)} total, {len(new_facts)} new since last planning)")
+        recent = new_facts[-max_facts:]
+        for i, f in enumerate(recent):
+            desc = (f.get("description") or "").strip().replace("\n", " ")
+            if len(desc) > 140:
+                desc = desc[:140] + "…"
+            lines.append(f"- {f.get('id', '?')}: {desc}")
+        if not new_facts:
+            lines.append("- (no new facts since last planning)")
+    else:
+        lines.append(f"## Confirmed facts ({len(facts)})")
+        recent = facts[-max_facts:]
+        dropped = len(facts) - len(recent)
+        if dropped > 0:
+            lines.append(f"(showing the latest {len(recent)} of {len(facts)} facts)")
+        for i, f in enumerate(recent):
+            desc = (f.get("description") or "").strip().replace("\n", " ")
+            if len(desc) > 140:
+                desc = desc[:140] + "…"
+            lines.append(f"- {f.get('id', '?')}: {desc}")
 
     open_its = [i for i in intents if i.get("status") in ("open", "claimed")]
     lines.append(f"## Open intents ({len(open_its)})")

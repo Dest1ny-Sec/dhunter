@@ -661,3 +661,48 @@ func minInt2(a, b int) int {
 	}
 	return b
 }
+
+// --- target favorite (pinning) -------------------------------------------
+
+func TestTargetFavoriteContract(t *testing.T) {
+	// PATCH /targets/:id/favorite pins a target; List returns favorites
+	// first, and the JSON carries `favorite`.
+	e := newE2E(t)
+	_, t1 := e.mustJSON(t, "POST", "/api/targets", e.token, map[string]any{"input": "older.example.com", "type": "auto"})
+	// created_at is millisecond-precision; make sure t2 is strictly newer so
+	// the unpinned ordering is deterministic.
+	time.Sleep(5 * time.Millisecond)
+	_, t2 := e.mustJSON(t, "POST", "/api/targets", e.token, map[string]any{"input": "newer.example.com", "type": "auto"})
+
+	// Pin the OLDER one — it must sort before the newer one.
+	code, fav := e.mustJSON(t, "PATCH", "/api/targets/"+t1["id"].(string)+"/favorite", e.token, map[string]any{"favorite": true})
+	if code != 200 || fav["favorite"] != true {
+		t.Fatalf("PATCH favorite = %d (%v)", code, fav)
+	}
+
+	code, list := e.mustJSON(t, "GET", "/api/targets", e.token, nil)
+	if code != 200 {
+		t.Fatalf("GET /api/targets = %d", code)
+	}
+	arr := list["targets"].([]any)
+	if len(arr) != 2 {
+		t.Fatalf("targets = %d, want 2", len(arr))
+	}
+	if arr[0].(map[string]any)["id"] != t1["id"] {
+		t.Fatalf("favorite target not sorted first: %v", arr[0])
+	}
+	if arr[0].(map[string]any)["favorite"] != true {
+		t.Fatalf("favorite flag missing in list item: %v", arr[0])
+	}
+
+	// Unpin → order flips back to newest first.
+	code, _ = e.mustJSON(t, "PATCH", "/api/targets/"+t1["id"].(string)+"/favorite", e.token, map[string]any{"favorite": false})
+	if code != 200 {
+		t.Fatalf("unpin = %d", code)
+	}
+	_, list = e.mustJSON(t, "GET", "/api/targets", e.token, nil)
+	arr = list["targets"].([]any)
+	if arr[0].(map[string]any)["id"] != t2["id"] {
+		t.Fatalf("after unpin newest should sort first: %v", arr[0])
+	}
+}
