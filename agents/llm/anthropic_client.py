@@ -127,10 +127,19 @@ async def stream_chat(
     payload: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": system,
         "messages": messages,
         "stream": True,
     }
+    # Anthropic-native prompt caching: send the system block as a content
+    # array marked cache_control=ephemeral so native Anthropic endpoints
+    # reuse it across turns and parallel workers. DeepSeek and most compat
+    # gateways ignore the field (they do automatic prefix caching), so this
+    # is harmless for them. Disable with DHUNTER_LLM_CACHE_SYSTEM=0 only for
+    # gateways that reject array-form `system`.
+    if system and _env("DHUNTER_LLM_CACHE_SYSTEM", "1") != "0":
+        payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    else:
+        payload["system"] = system
     if tools:
         payload["tools"] = tools
     if extra_body:

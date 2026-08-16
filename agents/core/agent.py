@@ -34,7 +34,11 @@ log = logging.getLogger(__name__)
 OVERALL_TIMEOUT = float(os.environ.get("DHUNTER_AGENT_OVERALL_TIMEOUT", "1800"))  # default 30 min (time-based run limit)
 STEP_TIMEOUT = float(os.environ.get("DHUNTER_AGENT_STEP_TIMEOUT", "120"))          # default 120s per LLM turn
 MAX_ITERATIONS = int(os.environ.get("DHUNTER_AGENT_MAX_ITERATIONS", "40"))         # tool-loop cap per worker
-MAX_TOOL_RESULT_CHARS = 20_000  # truncate huge tool outputs before the next LLM turn
+# Tool outputs are fed back to the LLM on the next turn and re-sent on every
+# subsequent turn, so a large cap directly inflates the context for the rest
+# of the loop. 8k keeps payloads meaningful without bloating the window;
+# agents that need more re-issue a targeted request.
+MAX_TOOL_RESULT_CHARS = 8_000  # truncate huge tool outputs before the next LLM turn
 
 
 def _now_iso() -> str:

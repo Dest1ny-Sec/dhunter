@@ -734,6 +734,23 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 		return false, "", err
 	}
 
+	// Cross-run dedup: the same finding already confirmed (or pending) for
+	// the same TARGET from an earlier run is a duplicate — re-running a
+	// target must not pile up identical rows. Dismissed rows are excluded
+	// (a fresh run may legitimately re-verify something once rejected).
+	if v.TargetID != "" {
+		err = tx.QueryRowContext(ctx,
+			`SELECT id FROM vulnerabilities
+			 WHERE target_id = ? AND norm_title = ? AND status != 'dismissed' AND run_id != ? LIMIT 1`,
+			v.TargetID, v.NormTitle, v.RunID).Scan(&id)
+		if err == nil {
+			return false, id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return false, "", err
+		}
+	}
+
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO vulnerabilities
 		 (id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at, norm_title)

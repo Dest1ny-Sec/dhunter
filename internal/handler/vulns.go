@@ -84,14 +84,21 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "run_id required"})
 		return
 	}
-	// Validate run exists (cheap FK sanity)
-	if _, err := h.Stores.Runs.Get(c.Request.Context(), body.RunID); err != nil {
+	// Validate run exists (cheap FK sanity) and fall back to the run's
+	// target when the client didn't send target_id (the Python agent's
+	// write_finding fallback doesn't). Needed for cross-run dedup.
+	run, err := h.Stores.Runs.Get(c.Request.Context(), body.RunID)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "run not found: " + body.RunID})
 		return
 	}
-	// Dedup within the run: same title + target is a duplicate. The check
-	// and insert are atomic (single transaction) so concurrent workers
-	// submitting the same finding can't both insert it.
+	if body.TargetID == "" {
+		body.TargetID = run.TargetID
+	}
+	// Dedup: same title + target within this run OR (cross-run) the same
+	// finding already confirmed for the same target. The check and insert
+	// are atomic (single transaction) so concurrent workers submitting the
+	// same finding can't both insert it.
 	v := &store.Vulnerability{
 		RunID:          body.RunID,
 		TargetID:       body.TargetID,

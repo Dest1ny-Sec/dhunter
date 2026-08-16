@@ -429,6 +429,59 @@ func TestConfigHasNoStaticDefaultToken(t *testing.T) {
 	}
 }
 
+// --- cross-run vulnerability dedup ----------------------------------------
+
+func TestCrossRunVulnDedup(t *testing.T) {
+	// Re-running a target must not pile up identical findings: the same
+	// title+target for the same target from an EARLIER run is a duplicate
+	// (409 + existing_id), while genuinely new findings still insert.
+	e := newE2E(t)
+	code, tgt := e.mustJSON(t, "POST", "/api/targets", e.token, map[string]any{"input": "dup.example.com", "type": "auto"})
+	if code != 201 {
+		t.Fatalf("create target = %d", code)
+	}
+	targetID := tgt["id"].(string)
+	_, run1 := e.mustJSON(t, "POST", "/api/runs", e.token, map[string]any{"target_id": targetID, "objective": "x"})
+	_, run2 := e.mustJSON(t, "POST", "/api/runs", e.token, map[string]any{"target_id": targetID, "objective": "y"})
+	run1ID := run1["run_id"].(string)
+	run2ID := run2["run_id"].(string)
+
+	// Finding in run1, using the Python fallback shape (no target_id — the
+	// handler must fall back to the run's target for cross-run dedup).
+	code, v1 := e.mustJSON(t, "POST", "/api/vulnerabilities", e.token, map[string]any{
+		"run_id": run1ID, "title": "SQL injection in login", "severity": "high", "target": "https://dup.example.com/login",
+	})
+	if code != 201 {
+		t.Fatalf("first finding = %d (%v), want 201", code, v1)
+	}
+
+	// Same finding in run2 → 409 pointing at the existing row.
+	code, dup := e.mustJSON(t, "POST", "/api/vulnerabilities", e.token, map[string]any{
+		"run_id": run2ID, "title": "SQL injection in login", "severity": "high", "target": "https://dup.example.com/login",
+	})
+	if code != 409 {
+		t.Fatalf("cross-run duplicate = %d (%v), want 409", code, dup)
+	}
+	if dup["existing_id"] != v1["id"] {
+		t.Fatalf("existing_id = %v, want %v", dup["existing_id"], v1["id"])
+	}
+
+	// A genuinely different finding in run2 still inserts.
+	code, _ = e.mustJSON(t, "POST", "/api/vulnerabilities", e.token, map[string]any{
+		"run_id": run2ID, "title": "XSS in profile", "severity": "medium", "target": "https://dup.example.com/profile",
+	})
+	if code != 201 {
+		t.Fatalf("new finding = %d, want 201", code)
+	}
+
+	// The per-run lists stay independent (run2 has exactly the XSS).
+	_, list2 := e.mustJSON(t, "GET", "/api/runs/"+run2ID+"/vulnerabilities", e.token, nil)
+	arr := list2["vulnerabilities"].([]any)
+	if len(arr) != 1 || arr[0].(map[string]any)["title"] != "XSS in profile" {
+		t.Fatalf("run2 vulns = %v, want only the XSS", arr)
+	}
+}
+
 // --- two-account A/B IDOR contract ----------------------------------------
 
 func TestTargetAuthAccountFields(t *testing.T) {

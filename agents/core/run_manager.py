@@ -38,10 +38,11 @@ WORKER_SLICE_SECONDS = 2.0
 # almost certainly the LLM misjudging an empty board — we force a bootstrap
 # recon intent instead of converging an empty run.
 MIN_EXPLORED_FACTS = 3
-# Findings wait in "pending" until the verifier re-judges them. We run the
-# verifier periodically DURING the run (not just at convergence) so confirmed
-# / dismissed results surface while the agent is still digging.
-VERIFY_INTERVAL = float(os.environ.get("DHUNTER_VERIFY_INTERVAL", "10"))
+# Findings wait in "pending" until the verifier re-judges them. We verify
+# DURING the run (not just at convergence) so confirmed/dismissed results
+# surface while the agent is still digging — but ONLY when a worker just
+# landed a finding (reaped_any), never on a fixed timer: a periodic LLM
+# judge call would burn tokens even when nothing new arrived.
 
 # Two-level public suffixes under which the registrable domain is the THIRD
 # label from the right (ecust.edu.cn, qq.com.cn, ...). Without this, a
@@ -63,7 +64,6 @@ class RunManager:
         self.run_auth: dict[str, Any] | None = None
         self.max_run_tokens = 0
         self.llm_config: dict[str, Any] | None = None
-        self._last_verify = time.monotonic()
         # Per-project worker cap (target attributes override the env default).
         self.max_workers = MAX_WORKERS
         # Set when the operator pauses the run — the loop stops without
@@ -194,10 +194,10 @@ class RunManager:
             await self.registry.ensure_mcp()
 
             # Verify pending findings — promptly when a worker just landed a
-            # finding (出漏洞优先验证), and at least every VERIFY_INTERVAL.
-            due = time.monotonic() - self._last_verify
-            if reaped_any or due > VERIFY_INTERVAL:
-                self._last_verify = time.monotonic()
+            # finding (出漏洞优先验证). No fixed timer: a worker finishing
+            # (reaped) is the only trigger, so no tokens are spent when
+            # nothing new arrived. The convergence tail re-checks leftovers.
+            if reaped_any:
                 await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config,
                                    auth_context=self.registry.get_run_auth(self.run.run_id))
 

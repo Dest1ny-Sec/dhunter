@@ -29,6 +29,12 @@ log = logging.getLogger(__name__)
 
 VERIFY_ENABLED = os.environ.get("DHUNTER_VERIFY", "1") != "0"
 
+# The verifier judges each finding by the rules in the USER message
+# (VERIFY_PROMPT below). It does NOT need the run's injected red lines /
+# cross-target knowledge, so it uses this tiny fixed system instead of
+# forwarding the worker's (token-heavy) system prompt on every call.
+VERIFIER_SYSTEM = "你是 SRC 漏洞复核评审。严格按用户消息中的判定规则判断，只输出一个 JSON 对象。"
+
 # Phenomena that SRC programs typically reject outright. Used as a hard
 # pre-filter in addition to the LLM's judgment, so a weak LLM can't sneak
 # scanner-noise through.
@@ -160,7 +166,9 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, ll
 
     confirmed, dismissed = 0, 0
     for v in pending:
-        verdict, reason, severity = await _judge(run, system_prompt, v, llm_config=llm_config, auth_context=auth_context)
+        # system_prompt is intentionally NOT forwarded: the verifier uses
+        # the small fixed VERIFIER_SYSTEM (rules live in the user message).
+        verdict, reason, severity = await _judge(run, v, llm_config=llm_config, auth_context=auth_context)
         try:
             if verdict:
                 # Also correct inflated severities from the LLM.
@@ -377,9 +385,14 @@ async def _replay(v: dict[str, Any], auth_context: dict[str, Any] | None = None)
     }
 
 
-async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_config: dict[str, Any] | None = None,
+async def _judge(run: AgentRun, v: dict[str, Any], llm_config: dict[str, Any] | None = None,
                  auth_context: dict[str, Any] | None = None) -> tuple[bool, str, str]:
-    """Returns (confirmed, reason, llm_severity)."""
+    """Returns (confirmed, reason, llm_severity).
+
+    Uses the small fixed VERIFIER_SYSTEM instead of the worker's system
+    prompt — the judging rules live in the user message, so forwarding the
+    run's red lines / knowledge would only burn tokens on every call.
+    """
     title = (v.get("title") or "")
     evidence = (v.get("evidence") or "")
 
@@ -408,12 +421,12 @@ async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_confi
         title=title[:300],
         severity=(v.get("severity") or "info"),
         target=(v.get("target") or ""),
-        evidence=evidence[:4000],
-        reproduction=(v.get("reproduction") or "")[:3000],
+        evidence=evidence[:2000],
+        reproduction=(v.get("reproduction") or "")[:1500],
         replay_note=replay_note,
     )
     try:
-        text = await call_llm_text(run, system=system_prompt, user_content=user_content, llm_config=llm_config)
+        text = await call_llm_text(run, system=VERIFIER_SYSTEM, user_content=user_content, llm_config=llm_config)
     except Exception as e:  # noqa: BLE001
         log.warning("verifier: judge call failed for %s: %s", v.get("id"), e)
         return False, "verifier LLM call failed", "info"

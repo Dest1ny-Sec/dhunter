@@ -117,6 +117,14 @@ const cacheHitRate = computed(() => {
   const total = read + fresh
   return total > 0 ? Math.round((read / total) * 100) : 0
 })
+// Token 预算红线（设置页配置，0=不限）：实时展示本次 run 已消耗多少 / 还剩多少。
+const budget = ref(0)
+const budgetInfo = computed(() => {
+  if (!budget.value || !runInfo.value) return null
+  const spent = (runInfo.value.input_tokens || 0) + (runInfo.value.output_tokens || 0)
+  const pct = Math.min(100, Math.round((spent / budget.value) * 100))
+  return { spent, pct, remaining: Math.max(0, budget.value - spent) }
+})
 // 粗略成本估算（按常见模型单价，仅供预算参考）
 const runCost = computed(() => estimateCostCNY(runInfo.value || {}, llmModel.value))
 function fmtN(n?: number): string {
@@ -230,8 +238,11 @@ onMounted(async () => {
   loadTools()
   toolTimer = window.setInterval(loadTools, 3000)
   try {
-    const llmRes = await api.get('/settings/llm')
+    const [llmRes, budRes] = await Promise.all([
+      api.get('/settings/llm'), api.get('/settings/budget'),
+    ])
     llmModel.value = llmRes.data?.model || ''
+    budget.value = budRes.data?.max_run_tokens || 0
   } catch { /* cost estimate falls back to default price */ }
 })
 onBeforeUnmount(() => {
@@ -274,6 +285,11 @@ watch(runId, async (v) => {
           · reasoning {{ fmtN(runInfo?.reasoning_tokens) }}
           · 缓存命中 <b style="color: var(--ok)">{{ cacheHitRate }}%</b>
           · 成本 ≈ <b style="color: var(--warning)">{{ fmtCostCNY(runCost) }}</b>
+          <template v-if="budgetInfo">
+            · 预算 <b :style="{ color: budgetInfo.pct >= 90 ? 'var(--danger)' : budgetInfo.pct >= 60 ? 'var(--warn)' : 'var(--ok)' }">
+              {{ fmtN(budgetInfo.spent) }} / {{ fmtN(budget) }}（{{ budgetInfo.pct }}%）
+            </b>
+          </template>
         </span>
       </div>
       <span class="muted" style="font-size: 12px">{{ events.length }} events</span>
