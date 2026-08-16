@@ -72,6 +72,18 @@ watch(
   }
 )
 
+// Merged deltas update the LAST row in place (length unchanged) — keep
+// auto-scrolling on the latest accumulated content too.
+watch(
+  () => props.events[props.events.length - 1]?.data,
+  async () => {
+    if (autoScroll.value) {
+      await nextTick()
+      if (bodyRef.value) bodyRef.value.scrollTop = bodyRef.value.scrollHeight
+    }
+  }
+)
+
 function scrollToBottom() {
   if (bodyRef.value) bodyRef.value.scrollTop = bodyRef.value.scrollHeight
 }

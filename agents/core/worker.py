@@ -128,7 +128,17 @@ async def run_explore_worker(
         log.info("worker %s: concluded intent %s -> fact %s", worker_name, intent_id, fact_id)
         return conclusion
     except asyncio.CancelledError:
-        log.info("worker %s: cancelled on intent %s", worker_name, intent_id)
+        # Pause/cancel: hand the intent BACK to the board so a later
+        # resume/continue can re-claim it. Without this, a claimed-but-
+        # unfinished intent would sit in "claimed" forever and be silently
+        # skipped after the run resumes.
+        log.info("worker %s: cancelled on intent %s — releasing for resume", worker_name, intent_id)
+        try:
+            # shield: we're inside the cancellation, so the release await
+            # must be shielded from the propagating CancelledError.
+            await asyncio.shield(board.release_intent(run.run_id, intent_id, worker_name))
+        except Exception:  # noqa: BLE001
+            pass
         raise
     except Exception as e:  # noqa: BLE001
         log.warning("worker %s: intent %s errored: %s", worker_name, intent_id, e)

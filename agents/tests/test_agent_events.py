@@ -135,3 +135,45 @@ def test_render_graph_summary_incremental_facts():
     assert "1 new since last planning" in inc, inc
     assert "f1" not in inc  # known fact omitted
     assert "f2" in inc  # new fact included
+
+
+def test_cancelled_worker_releases_intent(monkeypatch):
+    """Pause/cancel must hand a claimed intent BACK to the board, so a later
+    resume can re-claim it — otherwise the direction is silently dropped."""
+    import pytest
+    import core.agent as agent_mod
+    from core.worker import run_explore_worker
+    from fakes import FakeBoard
+
+    async def scenario():
+        board = FakeBoard()
+        await board.create_intent("r-cancel", [], "deep SSRF on openfile.jsp", creator="reason")
+        intent = board.intents[0]
+
+        # LLM that hangs forever → the worker stays in its tool loop.
+        # (async generator: `async for` over stream_chat must be iterable)
+        async def hang(system, messages, tools=None, **kwargs):
+            await asyncio.Event().wait()
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(agent_mod, "stream_chat", hang)
+        run = AgentRun(run_id="r-cancel", target="https://x", objective="x", queue=asyncio.Queue())
+        task = asyncio.create_task(run_explore_worker(run, board, FakeRegistry(), "sys", intent, "w1"))
+        try:
+            # Give the worker a moment to claim the intent.
+            for _ in range(50):
+                if board.intents[0]["status"] == "claimed":
+                    break
+                await asyncio.sleep(0.01)
+            assert board.intents[0]["status"] == "claimed", board.intents[0]
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # The intent must be open again (resumable), not stuck claimed.
+            assert board.intents[0]["status"] == "open", board.intents[0]
+            assert board.intents[0]["worker"] is None
+        finally:
+            if not task.done():
+                task.cancel()
+
+    asyncio.run(scenario())

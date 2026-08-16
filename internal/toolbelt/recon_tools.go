@@ -188,7 +188,11 @@ func httpxProbe(ctx context.Context, args map[string]interface{}) toolResult {
 // --- search engines & ICP ----------------------------------------------
 
 var (
-	searchLinkRe = regexp.MustCompile(`<a[^>]+href="(https?://[^"]+)"[^>]*>(?:[\s\S]*?)</a>`)
+	// NOTE: the title capture group must be a REAL capture group `(...)`,
+	// not `(?:...)` — searchEngine reads m[2] for the title. The old
+	// non-capturing form made m have length 2 and panicked on m[2]
+	// ("index out of range") whenever a link matched.
+	searchLinkRe = regexp.MustCompile(`<a[^>]+href="(https?://[^"]+)"[^>]*>([\s\S]*?)</a>`)
 	tagStripRe   = regexp.MustCompile(`<[^>]+>`)
 	icpNumRe     = regexp.MustCompile(`(?:备案号|icp)[:：\s]*([京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-Z]\w{5,7}号)`)
 	icpOwnerRe   = regexp.MustCompile(`(?:主办单位|主办方|主办人)[:：\s]*([^<\n]+?)(?:<|$)`)
@@ -209,6 +213,11 @@ func searchEngine(ctx context.Context, base, q, ua string, num int) ([]map[strin
 	seen := map[string]struct{}{}
 	out := make([]map[string]string, 0, num)
 	for _, m := range matches {
+		// Defensive: never index past the submatch slice, no matter how
+		// the regex evolves (this exact panic happened before).
+		if len(m) < 3 {
+			continue
+		}
 		href := m[1]
 		if strings.Contains(href, "baidu.com") || strings.Contains(href, "bing.com") || strings.Contains(href, "microsoft.com") {
 			continue

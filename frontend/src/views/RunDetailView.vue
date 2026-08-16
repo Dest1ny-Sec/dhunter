@@ -200,7 +200,22 @@ function connectSSE() {
       // accept all three so a mismatched field can never silently turn
       // every event into an untyped 'message' again.
       const ev: SSEEvent = { type: parsed.type || parsed.event || parsed.event_type || 'message', data: parsed.data ?? parsed, ts: parsed.ts || Date.now() }
-      events.value.push(ev)
+      // response_delta / reasoning_delta arrive PER CHUNK but each carries
+      // the FULL accumulated text (protocol behavior). Rendering every chunk
+      // as its own row makes the stream look like the same sentence repeated
+      // N times, growing by a few characters each — so merge consecutive
+      // deltas of the same type into ONE row (a typing effect): the row's
+      // content updates in place to the latest accumulated text.
+      if (ev.type === 'response_delta' || ev.type === 'reasoning_delta') {
+        const last = events.value[events.value.length - 1]
+        if (last && last.type === ev.type) {
+          events.value[events.value.length - 1] = { ...last, data: ev.data, ts: ev.ts ?? last.ts }
+        } else {
+          events.value.push(ev)
+        }
+      } else {
+        events.value.push(ev)
+      }
       // Long runs stream one event per delta chunk — cap the in-memory list
       // so the live-stream tab doesn't grind to a halt after thousands of
       // events. The DB keeps the full history (tool_calls / messages).
