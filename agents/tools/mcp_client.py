@@ -12,7 +12,9 @@ handled -- the Go side can re-list tools on demand.
 
 Env:
     DHUNTER_MCP_URL   default: http://127.0.0.1:9124/message
-    DHUNTER_MCP_TOKEN default: dhunter-mcp-please-change-me
+    DHUNTER_MCP_TOKEN default: (empty — no auth header; the MCP server
+                      requires a token, so deployments must set this to the
+                      same value as dhunter-mcp's -t / DHUNTER_MCP_TOKEN)
 """
 
 from __future__ import annotations
@@ -27,7 +29,11 @@ import httpx
 log = logging.getLogger(__name__)
 
 DEFAULT_MCP_URL = "http://127.0.0.1:9124/message"
-DEFAULT_MCP_TOKEN = "dhunter-mcp-please-change-me"
+# Intentionally EMPTY: there is no static default credential anymore. The
+# start scripts generate a random MCP token and pass it via
+# DHUNTER_MCP_TOKEN; without it the agent can't auth to the toolbelt and
+# falls back to the built-in HTTP tools.
+DEFAULT_MCP_TOKEN = ""
 PROTOCOL_VERSION = "2024-11-05"
 
 

@@ -136,11 +136,28 @@ func (h *TargetHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"targets": ts})
 }
 
+// accountReq is one logged-in account for A/B IDOR testing. The agent can
+// hold two sessions (account a / account b) and switch between them to
+// check cross-account access (user A's session reads user B's resource).
+type accountReq struct {
+	Username string            `json:"username"`
+	Password string            `json:"password"`
+	LoginURL string            `json:"login_url"`
+	Cookies  string            `json:"cookies"`
+	Headers  map[string]string `json:"headers,omitempty"`
+	Note     string            `json:"note,omitempty"`
+}
+
 // authReq is the body for PATCH /api/targets/:id/auth.
 type authReq struct {
 	Cookies string            `json:"cookies"`
 	Headers map[string]string `json:"headers"`
 	Note    string            `json:"note"`
+	// AccountA / AccountB carry the two sessions for A/B IDOR testing.
+	// They are persisted verbatim (JSON) so the Python agent can pick up
+	// username/password for auto-login and cookies/headers for injection.
+	AccountA *accountReq `json:"account_a,omitempty"`
+	AccountB *accountReq `json:"account_b,omitempty"`
 }
 
 // SetAuth stores (or clears) the authenticated session the agent should

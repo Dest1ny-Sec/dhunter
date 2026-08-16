@@ -140,7 +140,7 @@ def test_unstable_boolean_sqli_oracle_is_dismissed_by_replay():
     is wasted on a signal that does not reproduce."""
     original = verifier_mod._replay
 
-    async def flaky_replay(v):
+    async def flaky_replay(v, auth_context=None):
         return {
             "ok": True, "status": 200, "url": v.get("target", ""), "method": "GET",
             "stable": False,
@@ -178,7 +178,7 @@ def test_stable_replay_survives_the_gate():
     _patch_verify_llm('{"confirm": true, "reason": "stable replay, payload pulled admin session", "severity": "high"}')
     original = verifier_mod._replay
 
-    async def stable_replay(v):
+    async def stable_replay(v, auth_context=None):
         return {
             "ok": True, "status": 200, "url": v.get("target", ""), "method": "POST",
             "stable": True,
@@ -225,3 +225,58 @@ def test_parse_curl_requests_extracts_method_url_body():
     assert reqs[1]["method"] == "POST"
     assert reqs[1]["body"] == '{"user":"a"}'
     assert reqs[1]["headers"].get("Content-Type") == "application/json"
+
+
+def test_replay_injects_run_session_into_matching_host():
+    """The mechanical replay carries the run's session cookie/headers onto
+    the target host (and subdomains), so behind-auth findings replay the way
+    the worker tested them."""
+    from core.verifier import _auth_headers_for, _with_auth
+
+    auth = {
+        "host": "app.example.com",
+        "active": "b",
+        "accounts": {
+            "a": {"cookies": "SESS=a", "headers": {"X-Account": "a"}},
+            "b": {"cookies": "SESS=b; role=admin", "headers": {"X-Account": "b"}},
+        },
+    }
+    headers, host = _auth_headers_for(auth)
+    assert host == "app.example.com"
+    assert "SESS=b" in headers["Cookie"], headers
+
+    # Same host → injected.
+    r = _with_auth({"method": "GET", "url": "https://app.example.com/api/me", "headers": {}, "body": None},
+                   headers, host)
+    assert r["headers"]["Cookie"] == "SESS=b; role=admin"
+    assert r["headers"]["X-Account"] == "b"
+
+    # Subdomain → injected.
+    r = _with_auth({"method": "GET", "url": "https://api.app.example.com/x", "headers": {}, "body": None},
+                   headers, host)
+    assert r["headers"]["Cookie"] == "SESS=b; role=admin"
+
+    # Different host → left alone.
+    r = _with_auth({"method": "GET", "url": "https://evil.example.net/x", "headers": {}, "body": None},
+                   headers, host)
+    assert "Cookie" not in r["headers"]
+
+    # PoC's own Cookie wins over the stored session.
+    r = _with_auth({"method": "GET", "url": "https://app.example.com/x",
+                    "headers": {"Cookie": "manual=1"}, "body": None}, headers, host)
+    assert r["headers"]["Cookie"] == "manual=1"
+
+    # No session configured → untouched.
+    r = _with_auth({"method": "GET", "url": "https://app.example.com/x", "headers": {}, "body": None},
+                   {}, "")
+    assert "Cookie" not in r["headers"]
+
+
+def test_replay_ignores_other_host_cookies():
+    """A session stored for one target must never leak into replays against
+    a different host (cross-target cookie exfiltration guard)."""
+    from core.verifier import _auth_headers_for, _with_auth
+    headers, host = _auth_headers_for({"host": "a.example.com", "cookies": "SESS=secret"})
+    r = _with_auth({"method": "GET", "url": "https://b.example.com/x", "headers": {}, "body": None},
+                   headers, host)
+    assert "Cookie" not in r["headers"]

@@ -20,6 +20,8 @@ const hintMsg = ref('')
 let timer: number | null = null
 
 // ---------- data ----------
+const TERMINAL_RUN_STATES = ['completed', 'success', 'failed', 'cancelled']
+
 async function load() {
   try {
     const res = await api.get(`/runs/${props.runId}/graph`)
@@ -28,6 +30,13 @@ async function load() {
     hints.value = res.data?.hints || []
     loading.value = false
     syncGraph()
+    // Stop polling once the run reached a terminal state — an idle graph
+    // must not keep hammering /graph every 2.5s forever.
+    const st = res.data?.run?.status
+    if (st && TERMINAL_RUN_STATES.includes(st) && timer) {
+      window.clearInterval(timer)
+      timer = null
+    }
   } catch {
     loading.value = true
   }

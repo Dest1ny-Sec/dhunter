@@ -106,12 +106,14 @@ configs/dhunter.yaml         # default config
 
 ```bash
 go build -o /tmp/dhunter-server ./cmd/dhunter-server
-/tmp/dhunter-server --port 18999 &
+DHUNTER_ADMIN_TOKEN="dev-token" /tmp/dhunter-server --port 18999 &
+# (or leave DHUNTER_ADMIN_TOKEN unset — a random token is generated and
+#  printed in the startup banner / log; use that value below)
 
 curl -s http://127.0.0.1:18999/api/healthz
 # → {"status":"ok"}
 
-curl -s -H "Authorization: Bearer dhunter-admin-please-change-me" \
+curl -s -H "Authorization: Bearer dev-token" \
      -H "Content-Type: application/json" \
      -X POST -d '{"input":"https://example.com","type":"auto"}' \
      http://127.0.0.1:18999/api/targets

@@ -29,7 +29,6 @@ import (
 	"github.com/dhunter/dhunter/internal/config"
 	"github.com/dhunter/dhunter/internal/db"
 	"github.com/dhunter/dhunter/internal/handler"
-	"github.com/dhunter/dhunter/internal/middleware"
 	"github.com/dhunter/dhunter/internal/store"
 	"github.com/dhunter/dhunter/internal/stream"
 )
@@ -80,125 +79,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("dhunter: bootstrap admin: %v", err)
 	}
+	// Admin bearer token: configured value, else persisted, else a fresh
+	// random one persisted to the settings table. Never a static default.
+	cfg.Admin.Token = resolveAdminToken(stores.Settings, cfg.Admin.Token)
 	printBanner(cfg, generated)
 
 	// --- Stores / hub / agent bridge -------------------------------
 	hub := stream.New()
-	bridge := agent.New(cfg.Agent.PythonURL, stores, hub)
+	bridge := agent.New(cfg.Agent.PythonURL, cfg.Agent.Token, stores, hub)
 
-	// --- Router ----------------------------------------------------
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.Use(gin.Recovery())
-	router.Use(requestLogger())
-	router.Use(corsForOrigins(cfg.Server.AllowedOrigins))
-
-	mountWebUI(router)
-	router.GET("/api/healthz", handler.Healthz)
-	authH := handler.NewAuthHandler(cfg.Admin.Token, adminUser, passwordHash, stores.Settings)
-	router.POST("/api/auth/login", authH.Login)
-
-	// Authenticated API group.
-	api := router.Group("/api")
-	api.Use(middleware.Bearer(cfg.Admin.Token))
-	{
-		api.POST("/auth/change", authH.Change)
-		targetH := handler.NewTargetHandler(stores)
-		api.POST("/targets", targetH.Create)
-		api.GET("/targets", targetH.List)
-		api.GET("/targets/:id", targetH.Get)
-		api.PATCH("/targets/:id/auth", targetH.SetAuth)
-		api.PATCH("/targets/:id/redlines", targetH.SetRedLines)
-		api.DELETE("/targets/:id", targetH.Delete)
-
-		runH := handler.NewRunHandler(stores, bridge, hub)
-		api.POST("/runs", runH.Create)
-		api.POST("/runs/:id/cancel", runH.Cancel)
-		api.POST("/runs/:id/pause", runH.Pause)
-		api.POST("/runs/:id/continue", runH.Continue)
-
-		runsH := handler.NewRunsHandler(stores)
-		api.GET("/runs", runsH.List)
-		api.GET("/runs/:id", runsH.Get)
-		api.GET("/runs/:id/messages", runsH.Messages)
-		api.GET("/runs/:id/vulnerabilities", runsH.Vulnerabilities)
-		api.GET("/runs/:id/tool_calls", runsH.ToolCalls)
-		api.GET("/targets/:id/runs", runsH.ProjectRuns)
-
-		vulnsH := handler.NewVulnsHandler(stores)
-		api.GET("/vulnerabilities", vulnsH.List)
-		api.POST("/vulnerabilities", vulnsH.Create)
-		api.PATCH("/vulnerabilities/:id", vulnsH.Patch)
-
-		reportH := handler.NewReportHandler(stores)
-		api.GET("/runs/:id/report", reportH.Markdown)
-		api.GET("/targets/:id/report", reportH.ProjectReport)
-
-		searchH := handler.NewSearchHandler(stores)
-		api.GET("/search/messages", searchH.Messages)
-
-		// Platform status — lets the UI self-describe the bundled services
-		// instead of asking the user to configure them by hand. The server
-		// probes its own MCP + agent sidecars (the browser can't, cross-origin).
-		// Platform settings — LLM config import/test, token budget.
-		settingsH := handler.NewSettingsHandler(stores)
-		api.GET("/settings/llm", settingsH.GetLLM)
-		api.PUT("/settings/llm", settingsH.SaveLLM)
-		api.POST("/settings/llm/test", settingsH.TestLLM)
-		api.GET("/settings/budget", settingsH.GetBudget)
-		api.PUT("/settings/budget", settingsH.SaveBudget)
-		api.POST("/settings/clear-data", settingsH.ClearData)
-		api.GET("/knowledge", settingsH.KnowledgeList)
-		api.POST("/knowledge", settingsH.KnowledgeAdd)
-
-		api.GET("/status", func(c *gin.Context) {
-			hc := &http.Client{Timeout: 3 * time.Second}
-			probe := func(url string) string {
-				resp, err := hc.Get(url)
-				if err != nil {
-					return "disconnected"
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode < 500 {
-					return "connected"
-				}
-				return "disconnected"
-			}
-			agentURL := cfg.Agent.PythonURL
-			mcpBase := strings.TrimSuffix(cfg.MCP.WebHunter.URL, "/message")
-			c.JSON(http.StatusOK, gin.H{
-				"llm": gin.H{
-					"provider": cfg.LLM.Provider,
-					"model":    cfg.LLM.Model,
-					"base_url": cfg.LLM.BaseURL,
-					"key_set":  cfg.LLM.APIKey != "",
-				},
-				"mcp":   gin.H{"url": cfg.MCP.WebHunter.URL, "status": probe(mcpBase + "/health"), "tools": listMCPTools(cfg.MCP.WebHunter.URL, cfg.MCP.WebHunter.Token)},
-				"agent": gin.H{"url": agentURL, "status": probe(agentURL + "/healthz")},
-				"db":    gin.H{"path": cfg.Storage.SQLitePath},
-			})
-		})
-
-		// Board (blackboard): facts / intents / hints + graph export.
-		boardH := handler.NewBoardHandler(stores, hub)
-		api.GET("/runs/:id/facts", boardH.ListFacts)
-		api.POST("/runs/:id/facts", boardH.CreateFact)
-		api.GET("/runs/:id/intents", boardH.ListIntents)
-		api.POST("/runs/:id/intents", boardH.CreateIntent)
-		api.POST("/runs/:id/intents/:iid/claim", boardH.ClaimIntent)
-		api.POST("/runs/:id/intents/:iid/release", boardH.ReleaseIntent)
-		api.POST("/runs/:id/intents/:iid/conclude", boardH.ConcludeIntent)
-		api.POST("/runs/:id/intents/:iid/fail", boardH.FailIntent)
-		api.GET("/runs/:id/hints", boardH.ListHints)
-		api.POST("/runs/:id/hints", boardH.CreateHint)
-		api.GET("/runs/:id/graph", boardH.Graph)
-	}
-
-	// SSE — registered outside the auth group so it can accept
-	// `?token=...` directly. The handler itself re-checks the token
-	// (EventSource can't set headers), so the token is passed in here.
-	sseH := handler.NewSSEHandler(hub, stores, cfg.KeepAlive(), cfg.Admin.Token)
-	router.GET("/api/runs/:id/events", sseH.Events)
+	// --- Router (API + SSE + SPA) ----------------------------------
+	router := buildRouter(cfg, stores, hub, bridge, adminUser, passwordHash)
 
 	// --- Server + graceful shutdown --------------------------------
 	// Binds 127.0.0.1 by default. For remote/team access, set
@@ -237,10 +128,16 @@ func main() {
 // bootstrapAdmin resolves the admin login credentials (username + password
 // hash) used by /api/auth/login.
 //
-// Precedence: PERSISTED credentials win (first-run generation or a Settings
-// rotation), so changes survive restarts. A YAML bootstrap_password only
-// SEEDS the very first run (and is then persisted). If neither is present a
-// fresh random password is generated and printed in the banner exactly once.
+// Precedence:
+//  1. force_reset_password: true → bootstrap_password OVERWRITES the
+//     persisted hash (the recovery path for a lost password). Refuses to
+//     auto-generate: without an explicit bootstrap_password the server
+//     fails fast instead of silently rotating the credential.
+//  2. PERSISTED credentials win (first-run generation or a Settings
+//     rotation), so changes survive restarts.
+//  3. A YAML bootstrap_password only SEEDS the very first run (and is then
+//     persisted). If neither is present a fresh random password is
+//     generated and printed in the banner exactly once.
 func bootstrapAdmin(cfg *config.Config, settings *store.SettingsStore) (username, hash string, generated bool, err error) {
 	ctx := context.Background()
 
@@ -253,6 +150,27 @@ func bootstrapAdmin(cfg *config.Config, settings *store.SettingsStore) (username
 		username = persistedUser
 	}
 	cfg.Admin.Username = username
+
+	// Explicit force reset — the lost-password recovery path.
+	if cfg.Admin.ForceResetPassword {
+		plain := cfg.Admin.BootstrapPassword
+		if plain == "" {
+			return "", "", false, errors.New("force_reset_password: true requires bootstrap_password to be set (refusing to auto-generate a password)")
+		}
+		h, herr := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+		if herr != nil {
+			return "", "", false, herr
+		}
+		if err := settings.Set(ctx, handler.KeyAdminPasswordHash, string(h)); err != nil {
+			return "", "", false, err
+		}
+		if err := settings.Set(ctx, handler.KeyAdminUsername, username); err != nil {
+			return "", "", false, err
+		}
+		cfg.Admin.BootstrapPassword = plain
+		log.Printf("dhunter: admin credentials force-reset (force_reset_password=true) — remove the flag after confirming login")
+		return username, string(h), false, nil
+	}
 
 	// Persisted credentials win — a Settings rotation must survive restarts.
 	if existing, _ := settings.Get(ctx, handler.KeyAdminPasswordHash); existing != "" {
@@ -413,8 +331,6 @@ func mountWebUI(router *gin.Engine) {
 	}
 	log.Printf("dhunter: no web UI found (frontend/dist not built) — only API is served")
 }
-
-var _ = filepath.Join // keep filepath import if future flags need it
 
 // listMCPTools queries the bundled MCP server for its tool names (used by
 // the Settings page to show the toolbelt).

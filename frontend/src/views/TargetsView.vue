@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { onEnter } from '../utils/ime'
+import { hasUsableAuth } from '../utils/authContext'
+import { escapeHtml } from '../utils/format'
 import { api } from '../api/client'
 import UiButton from '../components/ui/UiButton.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import Icon from '../components/icons/Icon.vue'
+
+const md = new Marked({ gfm: true, breaks: true })
 
 const router = useRouter()
 const route = useRoute()
@@ -18,6 +24,8 @@ const projName = ref('')
 const maxWorkers = ref(0)
 const error = ref<string | null>(null)
 const delError = ref<string | null>(null)
+const listError = ref<string | null>(null)
+const exportMsg = ref<{ ok: boolean; text: string } | null>(null)
 const loading = ref(false)
 const authConfirmed = ref(false)
 const llmReady = ref(true)
@@ -29,8 +37,8 @@ const showForm = ref(false)
 const objective = ref<string>('寻找 SQL 注入、XSS、鉴权绕过、IDOR 以及任何真实可复现的漏洞，使用 write_finding 工具上报，每条都给出 curl 复现命令。')
 
 // auth section — up to two accounts for A/B IDOR testing
-const authA = ref({ username: '', password: '', login_url: '', cookie: '' })
-const authB = ref({ username: '', password: '', login_url: '', cookie: '' })
+const authA = ref({ username: '', password: '', login_url: '', cookies: '' })
+const authB = ref({ username: '', password: '', login_url: '', cookies: '' })
 const authCookies = ref('')
 const authHeaders = ref('')
 const authNote = ref('')
@@ -71,6 +79,7 @@ const sevByTarget = computed(() => {
 
 async function loadTargets() {
   targetsLoading.value = true
+  listError.value = null
   try {
     const [tRes, rRes, vRes] = await Promise.all([
       api.get('/targets'), api.get('/runs'), api.get('/vulnerabilities'),
@@ -78,6 +87,9 @@ async function loadTargets() {
     targets.value = tRes.data?.targets || tRes.data || []
     runs.value = rRes.data?.runs || rRes.data || []
     vulns.value = vRes.data?.vulnerabilities || vRes.data || []
+  } catch (e: any) {
+    // A failed load must NOT masquerade as "no targets yet" — surface it.
+    listError.value = e?.response?.data?.error || e?.message || '加载失败，请检查后端服务是否运行'
   } finally {
     targetsLoading.value = false
   }
@@ -164,8 +176,8 @@ function resetForm() {
   authCookies.value = ''
   authHeaders.value = ''
   authNote.value = ''
-  authA.value = { username: '', password: '', login_url: '', cookie: '' }
-  authB.value = { username: '', password: '', login_url: '', cookie: '' }
+  authA.value = { username: '', password: '', login_url: '', cookies: '' }
+  authB.value = { username: '', password: '', login_url: '', cookies: '' }
   redLines.value = ''
   showForm.value = false
   error.value = null
@@ -181,8 +193,10 @@ function parseHeaders(raw: string): Record<string, string> {
   return out
 }
 
+/** True only when the stored auth_context actually carries a usable
+ *  session (see utils/authContext). Shared with TargetRunsView. */
 function hasAuth(t: any): boolean {
-  return !!(t?.auth_context && t.auth_context !== '' && t.auth_context !== '{}')
+  return hasUsableAuth(t?.auth_context)
 }
 
 function newRun(t: any) {
@@ -207,12 +221,42 @@ function exportReport(t: any) {
   window.open(`/api/targets/${t.id}/report?token=${encodeURIComponent(token)}`, '_blank')
 }
 
+/** Download a sanitized standalone HTML copy of the project report. */
+async function exportHTML(t: any) {
+  exportMsg.value = null
+  try {
+    const res = await api.get(`/targets/${t.id}/report`, { responseType: 'text' })
+    const mdText = typeof res.data === 'string' ? res.data : res.data?.report || ''
+    const title = escapeHtml(t.name || t.value || 'Dhunter 报告')
+    // DOMPurify strips anything a hostile target page sneaked into the
+    // report (evidence is largely copied from target responses).
+    const body = DOMPurify.sanitize(md.parse(mdText) as string)
+    const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>${title}</title>
+<style>body{max-width:920px;margin:2rem auto;padding:0 1.5rem;font-family:-apple-system,'Segoe UI','PingFang SC',Helvetica,Arial,sans-serif;line-height:1.7;color:#1f2937}h1,h2,h3{border-bottom:1px solid #e5e7eb;padding-bottom:.3em}pre{background:#f3f4f6;padding:12px;border-radius:8px;overflow:auto}code{background:#f3f4f6;padding:2px 5px;border-radius:4px;font-size:.9em}table{border-collapse:collapse}td,th{border:1px solid #d1d5db;padding:6px 10px}</style>
+</head><body>${body}</body></html>`
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${(t.name || t.value || 'dhunter').replace(/[^\w\u4e00-\u9fa5.-]/g, '_')}-report.html`
+    a.click()
+    URL.revokeObjectURL(url)
+    exportMsg.value = { ok: true, text: '已导出 HTML 报告' }
+  } catch (e: any) {
+    exportMsg.value = { ok: false, text: '导出失败: ' + (e?.message || '未知错误') }
+  }
+}
+
 onMounted(() => {
   loadTargets()
   if (route.query.new === '1') showForm.value = true
   if (typeof route.query.target === 'string' && route.query.target) target.value = route.query.target
-  api.get('/settings/llm').then((r) => {
-    llmReady.value = !!(r.data?.api_key && r.data?.base_url)
+  // LLM "ready" = a key exists ANYWHERE (saved in Settings, or via env
+  // DHUNTER_LLM_KEY / DHUNTER_LLM_API_KEY) — not only in the Settings row,
+  // otherwise env-configured users see a false "not configured" banner.
+  Promise.all([api.get('/settings/llm'), api.get('/status')]).then(([llm, st]) => {
+    llmReady.value = !!(llm.data?.api_key || st.data?.llm?.key_set)
   }).catch(() => { llmReady.value = false })
 })
 </script>
@@ -265,6 +309,9 @@ onMounted(() => {
         <label class="field-label">目标说明（告诉 AI 重点找什么）</label>
         <textarea v-model="objective" rows="2" style="width: 100%" />
       </div>
+      <div class="muted" style="font-size: 12px">
+        单次运行最长约 30 分钟，到点自动停止并保留进度，可随时在运行页点「继续深入」续跑。
+      </div>
       <details class="auth-details">
         <summary>身份会话（可选）— 填写登录信息以测试鉴权后接口</summary>
         <div class="auth-fields">
@@ -277,14 +324,14 @@ onMounted(() => {
             <input v-model="authA.username" style="width: 100%" placeholder="账号 A 用户名/邮箱" />
             <input v-model="authA.password" type="password" style="width: 100%" placeholder="账号 A 密码" />
             <input v-model="authA.login_url" style="width: 100%" placeholder="登录地址（可选）" />
-            <input v-model="authA.cookie" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="账号 A Cookie（可选，已登录则直接填）" />
+            <input v-model="authA.cookies" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="账号 A Cookie（可选，已登录则直接填）" />
           </div>
           <div class="acct-group">
             <div class="acct-title">账号 B（越权目标账号，测 A 越权到 B）</div>
             <input v-model="authB.username" style="width: 100%" placeholder="账号 B 用户名/邮箱" />
             <input v-model="authB.password" type="password" style="width: 100%" placeholder="账号 B 密码" />
             <input v-model="authB.login_url" style="width: 100%" placeholder="登录地址（可选）" />
-            <input v-model="authB.cookie" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="账号 B Cookie（可选）" />
+            <input v-model="authB.cookies" style="width: 100%; font-family: monospace; font-size: 12px" placeholder="账号 B Cookie（可选）" />
           </div>
           <div>
             <label class="field-label">自定义请求头（每行 <code>Key: value</code>）</label>
@@ -321,6 +368,18 @@ onMounted(() => {
       <span style="color: var(--danger); font-size: 13px">✕ 删除失败：{{ delError }}</span>
     </div>
 
+    <div v-if="listError" class="card" style="padding: 12px 14px; border-color: var(--danger); margin-bottom: 12px; display: flex; align-items: center; gap: 10px">
+      <span style="color: var(--danger); font-size: 13px">✕ {{ listError }}</span>
+      <span class="spacer" />
+      <button @click="loadTargets" style="min-height: 26px; padding: 0 10px; font-size: 12px">重试</button>
+    </div>
+
+    <div v-if="exportMsg" class="card" :style="{ padding: '10px 14px', marginBottom: '12px', borderColor: exportMsg.ok ? 'var(--ok)' : 'var(--danger)' }">
+      <span :style="{ color: exportMsg.ok ? 'var(--ok)' : 'var(--danger)', fontSize: '13px' }">
+        {{ exportMsg.ok ? '✓' : '✕' }} {{ exportMsg.text }}
+      </span>
+    </div>
+
     <div v-if="targetsLoading" class="card" style="padding: 18px">
       <div class="sk-grid">
         <UiSkeleton v-for="i in 4" :key="i" block height="156px" radius="12px" />
@@ -346,7 +405,8 @@ onMounted(() => {
           <div class="eng-card-foot-actions">
             <button class="ghost" @click="newRun(t)">新建运行</button>
             <button @click="viewRuns(t)">历史</button>
-            <button @click="exportReport(t)">导出报告</button>
+            <button @click="exportReport(t)">导出 Markdown</button>
+            <button @click="exportHTML(t)">导出 HTML</button>
             <button class="ghost danger-text" @click="removeTarget(t)" :aria-label="'删除项目 ' + (t.name || t.value)">删除</button>
           </div>
         </div>

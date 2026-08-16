@@ -14,15 +14,25 @@ import (
 	"github.com/dhunter/dhunter/internal/stream"
 )
 
+// RunStarter is the subset of the Python-agent bridge the run handler
+// needs. Declared as an interface so contract/E2E tests can inject a stub
+// instead of requiring a live sidecar.
+type RunStarter interface {
+	CreateRun(ctx context.Context, req agent.CreateRunRequest) error
+	CancelRun(ctx context.Context, runID string) error
+	PauseRun(ctx context.Context, runID string) error
+	Subscribe(ctx context.Context, runID string) error
+}
+
 // RunHandler handles POST /api/runs.
 type RunHandler struct {
 	Stores *store.Stores
-	Bridge *agent.Bridge
+	Bridge RunStarter
 	Hub    *stream.Hub
 }
 
 // NewRunHandler constructs a RunHandler.
-func NewRunHandler(s *store.Stores, b *agent.Bridge, h *stream.Hub) *RunHandler {
+func NewRunHandler(s *store.Stores, b RunStarter, h *stream.Hub) *RunHandler {
 	return &RunHandler{Stores: s, Bridge: b, Hub: h}
 }
 

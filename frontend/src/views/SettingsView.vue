@@ -171,7 +171,10 @@ onMounted(load)
           </span>
         </div>
         <div class="muted" style="font-size: 12px">
-          修改后登录凭据立即生效（Bearer token 不变）。遗忘密码可查看启动日志或修改 configs/dhunter.yaml 的 bootstrap_password。
+          修改后登录凭据立即生效（Bearer token 不变）。
+          <b>忘记密码：</b>在 <code>configs/dhunter.yaml</code> 设置
+          <code>bootstrap_password: 新密码</code> 并加 <code>force_reset_password: true</code>，
+          重启后密码即重置为该值，登录成功后请移除该开关。
         </div>
       </UiCard>
 

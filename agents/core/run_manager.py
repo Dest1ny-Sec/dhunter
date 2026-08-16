@@ -131,7 +131,21 @@ class RunManager:
                 break
 
             graph = await self.board.graph(self.run.run_id)
-            # time-based run limit is the only stop mechanism (see OVERALL_TIMEOUT)
+
+            # Token budget red line: if the run burned its configured budget
+            # (input+output, cache reads excluded), stop gracefully — same
+            # shape as the time-based run limit so the board survives for a
+            # later "continue".
+            if await self._budget_exhausted(graph):
+                self.run.summary = (
+                    f"达到 token 预算上限（{self.max_run_tokens} tokens），已自动停止。"
+                    "可点击「继续深入」从当前进度续跑。"
+                )
+                log.info("run %s: token budget (%s) exhausted, stopping", self.run.run_id, self.max_run_tokens)
+                break
+
+            # Stop mechanisms: per-run token budget (above) and the
+            # time-based run limit (see OVERALL_TIMEOUT).
             open_its = [i for i in (graph.get("intents") or []) if i.get("status") == "open"]
 
             # reap finished workers
@@ -184,7 +198,8 @@ class RunManager:
             due = time.monotonic() - self._last_verify
             if reaped_any or due > VERIFY_INTERVAL:
                 self._last_verify = time.monotonic()
-                await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
+                await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config,
+                                   auth_context=self.registry.get_run_auth(self.run.run_id))
 
             # wait for progress (or a short tick)
             if self.workers:
@@ -210,7 +225,8 @@ class RunManager:
         # Quality gate: independently re-judge every pending finding.
         # Run a second pass if a worker landed a finding in the last instant
         # (a race that otherwise leaves a fresh finding stuck in "pending").
-        await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
+        await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config,
+                           auth_context=self.registry.get_run_auth(self.run.run_id))
         for _ in range(2):
             try:
                 still = [v for v in await self.board.list_vulnerabilities(self.run.run_id) if v.get("status") in ("pending", "open")]
@@ -218,7 +234,8 @@ class RunManager:
                 break
             if not still:
                 break
-            await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config)
+            await run_verifier(self.run, self.board, self.system_prompt, llm_config=self.llm_config,
+                               auth_context=self.registry.get_run_auth(self.run.run_id))
 
         # Findings still pending after all verifier passes mean the SRC gate
         # silently missed them (LLM judge call failed, backend PATCH failed,

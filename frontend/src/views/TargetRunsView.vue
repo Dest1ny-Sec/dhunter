@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
+import { hasUsableAuth } from '../utils/authContext'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -36,8 +37,10 @@ function duration(r: any): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}分${sec % 60}秒`
   return `${Math.floor(sec / 3600)}时${Math.floor((sec % 3600) / 60)}分`
 }
+/** True only when the stored auth_context actually carries a usable session
+ *  (shared logic in utils/authContext). */
 function hasAuth(): boolean {
-  return !!(target.value?.auth_context && target.value.auth_context !== '' && target.value.auth_context !== '{}')
+  return hasUsableAuth(target.value?.auth_context)
 }
 
 async function load() {

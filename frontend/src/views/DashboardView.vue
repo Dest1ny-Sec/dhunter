@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { estimateCostCNY, fmtCostCNY } from '../utils/cost'
@@ -46,32 +46,51 @@ const donutData = computed(() => severityOrder.map((s) => ({
   label: severityLabels[s], value: sevCounts.value[s] || 0, color: severityColors[s],
 })))
 
-// synthesized sparklines (replace with real history endpoint when available)
-const sparkFor = (peak: number, base = 0) => synth(14, base, peak)
-const tokenSpark = computed(() => sparkFor(Math.max(totalTokens.value / 100, 8), 1))
-const engagementSpark = computed(() => sparkFor(Math.max(targets.value.length, 3)))
-const totalRunsSpark = computed(() => sparkFor(Math.max(runs.value.length, 2)))
-const runningSpark = computed(() => sparkFor(Math.max(runningRuns.value, 1)))
-const vulnsSpark = computed(() => sparkFor(Math.max(confirmedCount.value, 1)))
+// Real time-series, NOT synthesized demo data: the hero sparkline is the
+// token spend of the most recent runs (oldest → newest).
+const tokenSpark = computed<number[]>(() =>
+  [...runs.value]
+    .filter((r) => r.started_at)
+    .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+    .slice(-14)
+    .map((r) => (r.input_tokens || 0) + (r.output_tokens || 0)),
+)
 
+// Real vulnerability-discovery trend, bucketed by created_at. Dismissed
+// findings are excluded; an empty board renders a flat zero line instead
+// of a fabricated curve.
 const trendData = computed(() => {
-  if (trendRange.value === 'day') {
-    return { data: [40, 80, 65, 120, 90, 180, 160, 240, 220, 280, 260, 320], labels: ['00', '02', '04', '06', '08', '10', '12', '14', '16', '18', '20', '22'] }
-  } else if (trendRange.value === 'week') {
-    return { data: [120, 200, 180, 280, 260, 340, 320], labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] }
-  }
-  return { data: [800, 1200, 950, 1500, 1800, 1700, 2100, 1900, 2400, 2200, 2800, 2600], labels: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'] }
-})
+  const now = new Date()
+  const dayMs = 86_400_000
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfWeek = startOfToday - ((now.getDay() + 6) % 7) * dayMs // Monday
 
-function synth(n: number, base: number, peak: number): number[] {
-  const out: number[] = []
-  for (let i = 0; i < n; i++) {
-    const t = i / (n - 1)
-    const wave = Math.sin(t * Math.PI * 1.6) * 0.6 + 0.4
-    out.push(Math.max(0, Math.round(base + (peak - base) * wave + (Math.random() - 0.5) * 0.5)))
+  const buckets: { label: string; from: number; to: number }[] = []
+  if (trendRange.value === 'day') {
+    for (let h = 0; h < 24; h++) {
+      buckets.push({ label: `${h}时`, from: startOfToday + h * 3_600_000, to: startOfToday + (h + 1) * 3_600_000 })
+    }
+  } else if (trendRange.value === 'week') {
+    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+    for (let d = 0; d < 7; d++) {
+      buckets.push({ label: days[d], from: startOfWeek + d * dayMs, to: startOfWeek + (d + 1) * dayMs })
+    }
+  } else {
+    for (let m = 0; m < 12; m++) {
+      buckets.push({ label: `${m + 1}月`, from: new Date(now.getFullYear(), m, 1).getTime(), to: new Date(now.getFullYear(), m + 1, 1).getTime() })
+    }
   }
-  return out
-}
+  const data = buckets.map((b) => {
+    let n = 0
+    for (const v of vulns.value) {
+      if (v.status === 'dismissed') continue
+      const t = v.created_at ? new Date(v.created_at).getTime() : 0
+      if (t >= b.from && t < b.to) n++
+    }
+    return n
+  })
+  return { data, labels: buckets.map((b) => b.label) }
+})
 
 function fmtN(n?: number): string {
   if (n == null) return '—'
@@ -93,24 +112,38 @@ function goSearch() { router.push('/search') }
 
 const isEmpty = computed(() => !loading.value && targets.value.length === 0 && runs.value.length === 0 && vulns.value.length === 0)
 
-onMounted(async () => {
+// The dashboard is a live status board: refresh on mount, then poll every
+// 30s so "正在运行" and the recent-runs table stay current without a manual
+// reload. Cleaned up on unmount.
+let refreshTimer: number | null = null
+
+async function loadData() {
   try {
-    const [t, r, v] = await Promise.all([
+    const [t, r, v, llmRes, st] = await Promise.all([
       api.get('/targets'), api.get('/runs'), api.get('/vulnerabilities'),
+      api.get('/settings/llm'), api.get('/status'),
     ])
     targets.value = t.data?.targets || t.data || []
     runs.value = r.data?.runs || r.data || []
     vulns.value = v.data?.vulnerabilities || v.data || []
+    llmModel.value = llmRes.data?.model || ''
+    // LLM "ready" = a key exists ANYWHERE: saved in Settings, or set via
+    // env (DHUNTER_LLM_KEY / DHUNTER_LLM_API_KEY). Only when none exists
+    // does the "not configured" banner show.
+    llmReady.value = !!(llmRes.data?.api_key || st.data?.llm?.key_set)
+  } catch {
+    llmReady.value = false
   } finally {
     loading.value = false
   }
-  try {
-    const llmRes = await api.get('/settings/llm')
-    llmModel.value = llmRes.data?.model || ''
-    llmReady.value = !!(llmRes.data?.api_key && llmRes.data?.base_url)
-  } catch {
-    llmReady.value = false
-  }
+}
+
+onMounted(() => {
+  loadData()
+  refreshTimer = window.setInterval(loadData, 30_000)
+})
+onBeforeUnmount(() => {
+  if (refreshTimer) window.clearInterval(refreshTimer)
 })
 </script>
 
@@ -160,7 +193,6 @@ onMounted(async () => {
           label="授权目标"
           :value="targets.length"
           icon-name="target"
-          :spark-data="engagementSpark"
           :foot="loading ? '加载中…' : '当前可发起 AI 渗透测试'"
           accent="#5fc8d4"
           @arrow="goTargets"
@@ -171,7 +203,6 @@ onMounted(async () => {
           label="正在运行"
           :value="runningRuns"
           icon-name="play"
-          :spark-data="runningSpark"
           :foot="runningRuns > 0 ? '实时监控中' : '当前空闲'"
           accent="#a78bfa"
           @arrow="goRuns"
@@ -183,7 +214,6 @@ onMounted(async () => {
           :value="confirmedCount"
           icon-name="flag"
           accent="#e26472"
-          :spark-data="vulnsSpark"
           :foot="`待审 ${pendingCount} · 已忽略 ${vulns.filter(v => v.status === 'dismissed').length}`"
           @arrow="goVulns"
         />

@@ -183,7 +183,11 @@ async def run_tool_loop(
         for tu in tool_uses:
             name = tu["name"]
             args = tu["input"] or {}
-            await run.emit("tool_call", {"name": name, "arguments": args})
+            # call_id is the LLM's tool_use block id — the bridge relays it
+            # to the frontend so a tool_call can be paired with its
+            # tool_result (one logical invocation = one UI row).
+            call_id = str(tu.get("id") or "")
+            await run.emit("tool_call", {"name": name, "arguments": args, "call_id": call_id})
             t0 = time.monotonic()
             try:
                 result = await registry.call(name, args, current_run_id=run.run_id)
@@ -196,6 +200,7 @@ async def run_tool_loop(
             await run.emit("tool_result", {
                 "name": name, "content": content_str,
                 "is_error": bool(result.get("is_error")), "duration_ms": duration_ms,
+                "call_id": call_id,
             })
             tool_result_blocks.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content_str, "is_error": bool(result.get("is_error"))})
 

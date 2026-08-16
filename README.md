@@ -109,6 +109,9 @@ powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start   # Win
 ### 手动启动（从源码）
 
 ```bash
+# 0. （推荐）一次性生成并导出三进程一致的 token（agent 复用平台 token）
+source scripts/dev-env.sh
+
 # 1. 构建前端（仓库已带预构建 dist，改过前端才需要；跳过则直接跑 server）
 cd frontend && npm install && npm run build && cd ..
 
@@ -116,7 +119,7 @@ cd frontend && npm install && npm run build && cd ..
 go build -o bin/dhunter-server ./cmd/dhunter-server
 go build -o bin/dhunter-mcp    ./cmd/dhunter-mcp
 
-# 3. 启动 Python agent（黑板引擎）
+# 3. 启动 Python agent（黑板引擎；token 与平台一致，三进程一个标准）
 cd agents
 pip install -r requirements.txt
 python -m core.server          # 127.0.0.1:9100
@@ -124,10 +127,16 @@ cd ..
 
 # 4. 启动 server（自动 serve 前端 dist）
 ./bin/dhunter-server --config configs/dhunter.yaml   # 127.0.0.1:13343
+# admin token 未配置时会自动生成随机值并持久化（横幅/日志可见）；可用
+# DHUNTER_ADMIN_TOKEN 显式指定
 
 # 5. （可选）外部扫描器
 ./scripts/setup-tools.sh
 ```
+
+> 不用 `dev-env.sh` 也可以：只要保证 Python agent 的 `DHUNTER_AGENT_TOKEN`
+> 与 Go server 的 `DHUNTER_AGENT_TOKEN` 一致（推荐都用平台 admin token），
+> MCP 用独立 token 并同时传给 `dhunter-mcp -t` 与 `DHUNTER_MCP_TOKEN`。
 
 ## 🧰 外部工具依赖（可选）
 
@@ -195,13 +204,21 @@ llm:
 |---|---|---|
 | `server.port` | `13343` | HTTP 端口 |
 | `agent.python_url` | `http://127.0.0.1:9100` | Python agent |
+| `agent.token` | 空 | 发给 Python agent 的 Bearer token（须与 agent 的 `DHUNTER_AGENT_TOKEN` 一致；留空=agent 无鉴权，仅本地开发） |
 | `mcp.webhunter.url` | `http://127.0.0.1:9124/message` | MCP 工具端点 |
+| `mcp.webhunter.token` | 空 | dhunter-mcp 的 Bearer token（设置页探测工具列表用；可由 `DHUNTER_MCP_TOKEN` 覆盖） |
 | `llm.provider` | `anthropic` | `anthropic` / `openai` |
 | `storage.sqlite_path` | `../data/dhunter.db` | 相对配置文件解析，跨平台 |
 | `admin.username` | `admin` | 登录用户名（首启可改） |
 | `admin.bootstrap_password` | 空 | 首次启动初始密码；留空则随机生成。改密码请用设置页 |
+| `admin.token` | 空（自动生成） | 平台 admin Bearer token；**留空时首次启动自动生成随机值并持久化**（重启不变，横幅展示），不再有静态默认值 |
 
-环境变量：`DHUNTER_PORT` / `DHUNTER_SQLITE_PATH` / `DHUNTER_LLM_API_KEY` / `DHUNTER_ADMIN_TOKEN` 等均可覆盖 YAML。
+环境变量：`DHUNTER_PORT` / `DHUNTER_SQLITE_PATH` / `DHUNTER_LLM_API_KEY` /
+`DHUNTER_ADMIN_TOKEN` / `DHUNTER_AGENT_TOKEN` / `DHUNTER_MCP_TOKEN` 等均可覆盖 YAML。
+
+> 🔐 **三进程一个鉴权标准**：Go server（13343）、Python agent（9100）、MCP（9124）
+> 全部使用 Bearer token 鉴权（agent 侧通过 `DHUNTER_AGENT_TOKEN` 启用）。
+> 登录接口带每 IP 限速（默认 10 次/分钟），防止口令爆破。
 
 ## 🔧 常用命令
 
@@ -210,6 +227,34 @@ llm:
 ./scripts/start-dhunter.sh stop     # 停止
 ./scripts/start-dhunter.sh logs     # 跟踪日志
 ```
+
+## 📋 更新日志
+
+### v0.3.0 — 2026-08-16 · 安全加固 · 契约修复 · 前端完善
+
+**安全加固（自身）**
+- 前端报告/证据渲染接入 **DOMPurify**，堵住"目标页内容 → 管理员浏览器"的存储型 XSS 链；
+- **三进程统一 Bearer 鉴权**：Python agent（9100）新增 `DHUNTER_AGENT_TOKEN`（Go server 自动携带），与平台/MCP 同一标准；
+- 删除默认静态 token（`dhunter-admin-please-change-me` 等）：`admin.token` 留空时首次启动自动生成随机值并持久化，重启不变；
+- 登录接口新增 **每 IP 限速**（默认 10 次/分钟），防口令爆破；
+- **Token 预算红线生效**（此前是死代码）：`设置 → Token 预算` 到点自动停止并保留进度；
+- 新增 **`force_reset_password` 密码找回路径**：`configs/dhunter.yaml` 设 `bootstrap_password` + `force_reset_password: true`，重启即重置（无密码时拒绝执行）。
+
+**功能修复（用户可见）**
+- **双账号 A/B IDOR 真正可用**：后端接收 `account_a/account_b`（此前被静默丢弃），"已配置会话"标记不再误报；
+- **实时事件流修复**：SSE 事件携带 `type` + `call_id`，推理/回复/工具调用三个 pane 恢复分类显示，**run 结束后页面状态自动更新**（此前一直停在 running 需手动刷新）；
+- 运行记录列表显示**目标名**（后端 JOIN targets 返回 `target_value/target_name`）；
+- 仪表盘趋势图改为**真实数据**（按漏洞发现时间聚合），不再展示硬编码假曲线；新增 30s 自动刷新；
+- 失败 run 的**失败原因**在详情页直接展示；创建表单提示 30 分钟运行上限；
+- 报告支持**导出 HTML**（DOMPurify 净化的独立文件）；
+- 小修：BoardView 终态停止轮询、事件流 1000 条截断、搜索框 IME 守卫、paused 状态样式、Targets 页加载错误提示、删除死组件。
+
+**测试与工程**
+- 新增 **Go E2E 契约测试**（10+ 用例）：锁定 targets/runs/vulns/report/SSE/鉴权/密码重置的 HTTP 契约，杜绝前后端字段名再漂移；
+- 新增 **前端测试框架（vitest）** 28 个用例 + CI 接入；
+- 端口默认值统一 `13343`（此前 Go/Python 多处写死 8080）；`vite` dev 代理同步修正；
+- 新增 `scripts/dev-env.sh`：手动启动一键生成/复用三进程一致 token；
+- `smoke-test.sh` 结束时自动清理测试数据。
 
 ## ⚠️ 免责声明
 

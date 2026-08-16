@@ -5,7 +5,7 @@ unreachable. They are defined inline so the MVP doesn't depend on a
 sidecar process to start a run.
 
 Env:
-    DHUNTER_BACKEND_URL  Go server for write_finding POST (default http://127.0.0.1:8080)
+    DHUNTER_BACKEND_URL  Go server for write_finding POST (default http://127.0.0.1:13343)
     DHUNTER_MCP_URL      MCP streamable-HTTP endpoint
     DHUNTER_MCP_TOKEN    MCP bearer token
 """
@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 
 def _backend_url() -> str:
-    return os.environ.get("DHUNTER_BACKEND_URL", "http://127.0.0.1:8080").rstrip("/")
+    return os.environ.get("DHUNTER_BACKEND_URL", "http://127.0.0.1:13343").rstrip("/")
 
 
 # --- Fallback tool implementations --------------------------------------
@@ -352,6 +352,12 @@ class ToolRegistry:
 
     def clear_run_auth(self, run_id: str) -> None:
         self._run_auths.pop(run_id, None)
+
+    def get_run_auth(self, run_id: str) -> dict[str, Any] | None:
+        """Return the run's stored session context (cookies/headers/host),
+        or None. Used by the verifier so mechanical replay re-runs PoCs
+        WITH the same authenticated session the worker used."""
+        return self._run_auths.get(run_id)
 
     def _inject_auth(self, args: dict[str, Any], run_id: str) -> dict[str, Any]:
         """Merge the run's stored session into an http_request's args when

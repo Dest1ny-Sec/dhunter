@@ -6,7 +6,7 @@ board over HTTP so multiple workers coordinate through it (stigmergy)
 instead of talking to each other.
 
 Env:
-    DHUNTER_BACKEND_URL   default: http://127.0.0.1:8080
+    DHUNTER_BACKEND_URL   default: http://127.0.0.1:13343
     DHUNTER_BACKEND_TOKEN admin bearer token
 """
 
@@ -21,7 +21,7 @@ from tools.registry import log
 
 
 def _backend_url() -> str:
-    return os.environ.get("DHUNTER_BACKEND_URL", "http://127.0.0.1:8080").rstrip("/")
+    return os.environ.get("DHUNTER_BACKEND_URL", "http://127.0.0.1:13343").rstrip("/")
 
 
 def _backend_token() -> str:

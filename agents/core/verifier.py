@@ -143,7 +143,8 @@ or
 """
 
 
-async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, llm_config: dict[str, Any] | None = None) -> None:
+async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, llm_config: dict[str, Any] | None = None,
+                       auth_context: dict[str, Any] | None = None) -> None:
     if not VERIFY_ENABLED:
         return
     try:
@@ -159,7 +160,7 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, ll
 
     confirmed, dismissed = 0, 0
     for v in pending:
-        verdict, reason, severity = await _judge(run, system_prompt, v, llm_config=llm_config)
+        verdict, reason, severity = await _judge(run, system_prompt, v, llm_config=llm_config, auth_context=auth_context)
         try:
             if verdict:
                 # Also correct inflated severities from the LLM.
@@ -280,11 +281,60 @@ def _unstable_replay_note(replay: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _replay(v: dict[str, Any]) -> dict[str, Any]:
+def _auth_headers_for(auth_context: dict[str, Any] | None) -> tuple[dict[str, str], str]:
+    """Resolve the run session's (headers, host): the ACTIVE account's cookies
+    and custom headers plus the target host they apply to. Returns empty when
+    no session is configured."""
+    if not auth_context:
+        return {}, ""
+    accounts = auth_context.get("accounts") or {}
+    active = auth_context.get("active") or "a"
+    acct = accounts.get(active) or {}
+    cookies = acct.get("cookies") or auth_context.get("cookies")
+    hdrs = acct.get("headers") or auth_context.get("headers") or {}
+    headers: dict[str, str] = {}
+    if cookies:
+        headers["Cookie"] = cookies
+    for k, v in (hdrs or {}).items():
+        headers.setdefault(str(k), str(v))
+    host = (auth_context.get("host") or "").strip().lower()
+    return headers, host
+
+
+def _with_auth(r: dict[str, Any], auth_headers: dict[str, str], auth_host: str) -> dict[str, Any]:
+    """Attach the run session to a request whose URL belongs to the target
+    host (exact host or a subdomain of it). A Cookie the PoC itself set is
+    kept — the finding's own headers win over the stored session."""
+    if not auth_headers or not auth_host:
+        return r
+    from urllib.parse import urlparse as _up
+    try:
+        host = (_up(r["url"]).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        return r
+    if not (host == auth_host or host.endswith("." + auth_host)):
+        return r
+    out = dict(r)
+    headers = dict(r.get("headers") or {})
+    header_keys = {k.lower() for k in headers}
+    for k, v in auth_headers.items():
+        if k.lower() == "cookie" and "cookie" in header_keys:
+            continue  # the PoC set its own Cookie — trust it
+        headers.setdefault(k, v)
+    out["headers"] = headers
+    return out
+
+
+async def _replay(v: dict[str, Any], auth_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Mechanically re-run the finding's PoC requests and check the oracle
     actually reproduces. Each distinct curl in reproduction/evidence is fired
     `_REPLAY_PASSES` times; if the same request yields different (status, body)
-    across passes, the signal is unstable -> the finding does not reproduce."""
+    across passes, the signal is unstable -> the finding does not reproduce.
+
+    `auth_context` (the run's stored session) is injected into requests that
+    hit the target host, so behind-auth findings (IDOR / privilege escalation)
+    are replayed with the same session the worker used — a bare replay without
+    cookies would 401/302 a valid finding into a false dismissal."""
     import httpx as _httpx
 
     text = (v.get("reproduction") or "") + "\n" + (v.get("evidence") or "")
@@ -296,11 +346,15 @@ async def _replay(v: dict[str, Any]) -> dict[str, Any]:
         reqs = [{"method": "GET", "url": url, "headers": {}, "body": None}]
     reqs = reqs[:_REPLAY_MAX_REQS]
 
+    # Resolve the active account's session (cookies/headers) once.
+    auth_headers, auth_host = _auth_headers_for(auth_context)
+
     outcomes: list[dict[str, Any]] = []
     stable = True
     try:
         async with _httpx.AsyncClient(timeout=10.0, trust_env=False, follow_redirects=True) as client:
             for r in reqs:
+                r = _with_auth(r, auth_headers, auth_host)
                 hits: list[tuple[int, str]] = []
                 for _ in range(_REPLAY_PASSES):
                     resp = await client.request(r["method"], r["url"], headers=r["headers"], content=r["body"])
@@ -323,7 +377,8 @@ async def _replay(v: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_config: dict[str, Any] | None = None) -> tuple[bool, str, str]:
+async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_config: dict[str, Any] | None = None,
+                 auth_context: dict[str, Any] | None = None) -> tuple[bool, str, str]:
     """Returns (confirmed, reason, llm_severity)."""
     title = (v.get("title") or "")
     evidence = (v.get("evidence") or "")
@@ -338,7 +393,7 @@ async def _judge(run: AgentRun, system_prompt: str, v: dict[str, Any], llm_confi
     # Mechanical replay: re-run the finding's own PoC requests and check the
     # oracle is stable. The judge must not trust the worker's text alone — a
     # differential that flips between two identical requests is noise.
-    replay = await _replay(v)
+    replay = await _replay(v, auth_context)
     if not replay.get("ok"):
         return False, f"机械重放失败: {replay.get('error', '')}", "info"
     if replay.get("stable") is False:

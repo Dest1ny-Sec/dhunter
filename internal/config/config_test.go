@@ -71,6 +71,32 @@ func TestEnvOverrideWinsOverYAML(t *testing.T) {
 	}
 }
 
+func TestForceResetPasswordLoadedFromYAML(t *testing.T) {
+	path := writeConfig(t, "admin:\n  bootstrap_password: \"new-pw\"\n  force_reset_password: true\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Admin.ForceResetPassword {
+		t.Fatal("force_reset_password not loaded from YAML")
+	}
+	if cfg.Admin.BootstrapPassword != "new-pw" {
+		t.Fatalf("bootstrap_password = %q, want new-pw", cfg.Admin.BootstrapPassword)
+	}
+}
+
+func TestForceResetPasswordEnvOverride(t *testing.T) {
+	t.Setenv("DHUNTER_ADMIN_FORCE_PASSWORD", "true")
+	path := writeConfig(t, "admin:\n  bootstrap_password: \"new-pw\"\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Admin.ForceResetPassword {
+		t.Fatal("DHUNTER_ADMIN_FORCE_PASSWORD=1 not honored")
+	}
+}
+
 // repoRoot walks up from this package to the repository root (contains go.mod).
 func repoRoot(t *testing.T) string {
 	t.Helper()

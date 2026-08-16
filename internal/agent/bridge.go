@@ -47,6 +47,10 @@ type CreateRunRequest struct {
 // subscribers and to the message store.
 type Event struct {
 	EventType string          `json:"event_type"`
+	// Type mirrors EventType under the key `type` — browser clients parse
+	// `type` (the Go-side wire name is `event_type`), so both are emitted
+	// to keep the SSE contract unambiguous.
+	Type string `json:"type"`
 	RunID     string          `json:"run_id"`
 	Role      string          `json:"role,omitempty"`
 	Content   string          `json:"content,omitempty"`
@@ -55,6 +59,9 @@ type Event struct {
 	Result    string          `json:"result,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
 	Duration  int64           `json:"duration_ms,omitempty"`
+	// CallID is the LLM's tool_use block id, carried on both tool_call and
+	// its tool_result so the frontend can pair them into one invocation.
+	CallID string `json:"call_id,omitempty"`
 	// Vulnerability fields, populated when EventType == "vulnerability".
 	VulnTitle          string `json:"title,omitempty"`
 	VulnSeverity       string `json:"severity,omitempty"`
@@ -77,10 +84,14 @@ type Event struct {
 
 // Bridge proxies to the Python sidecar.
 type Bridge struct {
-	baseURL  string
-	hc       *http.Client
-	stores   *store.Stores
-	hub      *stream.Hub
+	baseURL string
+	// token is the bearer credential the platform sends to the Python
+	// agent sidecar (cfg.Agent.Token / DHUNTER_AGENT_TOKEN). Empty = the
+	// sidecar runs without auth (local dev only).
+	token  string
+	hc     *http.Client
+	stores *store.Stores
+	hub    *stream.Hub
 }
 
 // New builds a Bridge. There is no client-level timeout: the subscribe
@@ -88,14 +99,23 @@ type Bridge struct {
 // real targets), and every request carries a caller-supplied context that
 // bounds it. The run handler passes a 70-minute context; the Python
 // agent's per-turn and overall timeouts are the real safety nets.
-func New(baseURL string, stores *store.Stores, hub *stream.Hub) *Bridge {
+func New(baseURL, token string, stores *store.Stores, hub *stream.Hub) *Bridge {
 	return &Bridge{
 		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
 		// Timeout 0 = no client deadline; the per-call context governs.
 		hc:     &http.Client{Timeout: 0},
 		stores: stores,
 		hub:    hub,
 	}
+}
+
+// withAuth attaches the sidecar bearer token (when configured).
+func (b *Bridge) withAuth(req *http.Request) {
+	if b.token == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+b.token)
 }
 
 // CreateRun tells the Python sidecar to start a new run. The sidecar is
@@ -111,6 +131,7 @@ func (b *Bridge) CreateRun(ctx context.Context, req CreateRunRequest) error {
 		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	b.withAuth(httpReq)
 
 	resp, err := b.hc.Do(httpReq)
 	if err != nil {
@@ -137,6 +158,7 @@ func (b *Bridge) CancelRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
+	b.withAuth(httpReq)
 	resp, err := b.hc.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
@@ -158,6 +180,7 @@ func (b *Bridge) PauseRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
+	b.withAuth(httpReq)
 	resp, err := b.hc.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("pause run: %w", err)
@@ -181,6 +204,7 @@ func (b *Bridge) Subscribe(ctx context.Context, runID string) error {
 	}
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Cache-Control", "no-cache")
+	b.withAuth(httpReq)
 
 	resp, err := b.hc.Do(httpReq)
 	if err != nil {
@@ -219,7 +243,7 @@ func (b *Bridge) consumeSSE(ctx context.Context, runID string, r io.Reader) erro
 		if streamBuf == "" {
 			return
 		}
-		ev := &Event{EventType: streamType, RunID: runID, Role: "assistant", Content: streamBuf}
+		ev := &Event{EventType: streamType, Type: streamType, RunID: runID, Role: "assistant", Content: streamBuf}
 		if streamType == EventReasoningDelta {
 			ev.Role = "reasoning"
 		}
@@ -296,6 +320,7 @@ func (b *Bridge) consumeSSE(ctx context.Context, runID string, r io.Reader) erro
 func mapPayloadToEvent(name, runID string, p map[string]interface{}) *Event {
 	ev := &Event{
 		EventType: name,
+		Type:      name,
 		RunID:     runID,
 	}
 	getStr := func(k string) string {
@@ -346,6 +371,7 @@ func mapPayloadToEvent(name, runID string, p map[string]interface{}) *Event {
 		}
 	case "tool_call":
 		ev.Name = getStr("name")
+		ev.CallID = getStr("call_id")
 		if args, ok := p["arguments"]; ok {
 			if ab, err := json.Marshal(args); err == nil {
 				ev.Args = ab
@@ -353,6 +379,7 @@ func mapPayloadToEvent(name, runID string, p map[string]interface{}) *Event {
 		}
 	case "tool_result":
 		ev.Name = getStr("name")
+		ev.CallID = getStr("call_id")
 		ev.Result = getStr("content")
 		ev.IsError = getBool("is_error")
 		ev.Duration = int64(getNum("duration_ms"))

@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -84,6 +84,36 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="dhunter-agent", version="0.1.0", lifespan=lifespan)
 
 
+# --- Agent API auth ------------------------------------------------------
+#
+# The agent sidecar binds 127.0.0.1 by default but is still reachable by any
+# local process (and by anything on the LAN when DHUNTER_AGENT_HOST is set
+# to 0.0.0.0). Gate every /v1 route with a bearer token so the sidecar is
+# protected by the same credential standard as the Go server and the MCP
+# toolbelt. The token comes from DHUNTER_AGENT_TOKEN (the start scripts pass
+# the platform admin token); when unset, auth is OFF and the server logs a
+# prominent warning — explicit opt-out for local-only development.
+_AUTH_TOKEN = os.environ.get("DHUNTER_AGENT_TOKEN", "").strip()
+if not _AUTH_TOKEN:
+    log.warning(
+        "DHUNTER_AGENT_TOKEN is not set — the agent API (127.0.0.1:%s) is running "
+        "WITHOUT authentication. Set it to the same bearer token as the platform "
+        "server for a protected deployment.",
+        os.environ.get("DHUNTER_AGENT_PORT", "9100"),
+    )
+
+
+def require_token(request: Request) -> None:
+    """FastAPI dependency: enforce the bearer token when one is configured."""
+    if not _AUTH_TOKEN:
+        return
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if header[len("Bearer "):].strip() != _AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 # --- Request / response models ------------------------------------------
 
 
@@ -115,7 +145,7 @@ async def readyz() -> dict[str, object]:
     }
 
 
-@app.post("/v1/runs", status_code=202)
+@app.post("/v1/runs", status_code=202, dependencies=[Depends(require_token)])
 async def start_run(body: StartRunBody) -> JSONResponse:
     if body.run_id in RUNS:
         # Continue: the same run is being resumed from its durable board.
@@ -155,7 +185,7 @@ async def start_run(body: StartRunBody) -> JSONResponse:
     return JSONResponse({"run_id": body.run_id, "status": "queued"}, status_code=202)
 
 
-@app.post("/v1/runs/{run_id}/cancel")
+@app.post("/v1/runs/{run_id}/cancel", dependencies=[Depends(require_token)])
 async def cancel_run(run_id: str) -> dict[str, object]:
     """Cancel a running run: the Go backend calls this when the operator
     hits POST /api/runs/:id/cancel. The RunManager's CancelledError path
@@ -169,7 +199,7 @@ async def cancel_run(run_id: str) -> dict[str, object]:
     return {"run_id": run_id, "status": run.status}
 
 
-@app.post("/v1/runs/{run_id}/pause")
+@app.post("/v1/runs/{run_id}/pause", dependencies=[Depends(require_token)])
 async def pause_run(run_id: str) -> dict[str, object]:
     """Pause a running run: signal the run_manager loop to stop dispatching
     without a terminal run_done. The board is kept, so the run can be resumed
@@ -182,7 +212,7 @@ async def pause_run(run_id: str) -> dict[str, object]:
     return {"run_id": run_id, "status": "pausing"}
 
 
-@app.get("/v1/runs/{run_id}")
+@app.get("/v1/runs/{run_id}", dependencies=[Depends(require_token)])
 async def get_run(run_id: str) -> dict[str, object]:
     run = RUNS.get(run_id)
     if run is None:
@@ -199,7 +229,7 @@ async def get_run(run_id: str) -> dict[str, object]:
     }
 
 
-@app.get("/v1/runs/{run_id}/events")
+@app.get("/v1/runs/{run_id}/events", dependencies=[Depends(require_token)])
 async def stream_events(run_id: str, request: Request) -> EventSourceResponse:
     if run_id not in RUNS:
         raise HTTPException(status_code=404, detail="run not found")

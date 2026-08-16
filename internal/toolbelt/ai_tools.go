@@ -134,7 +134,7 @@ func writeFinding(ctx context.Context, args map[string]interface{}) toolResult {
 	platformURL := strings.TrimRight(argString(args, "platform_url", firstEnv("DHUNTER_PLATFORM_URL", "DHUNTER_BACKEND_URL")), "/")
 	token := argString(args, "platform_token", firstEnv("DHUNTER_PLATFORM_TOKEN", "DHUNTER_BACKEND_TOKEN"))
 	if platformURL == "" {
-		platformURL = "http://127.0.0.1:8080"
+		platformURL = "http://127.0.0.1:13343"
 	}
 
 	payload := map[string]interface{}{

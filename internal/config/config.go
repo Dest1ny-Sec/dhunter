@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -40,6 +41,10 @@ type ServerConfig struct {
 // AgentConfig points to the Python sidecar that runs the LLM loop.
 type AgentConfig struct {
 	PythonURL string `yaml:"python_url"`
+	// Token is the bearer token the Go server sends to the Python agent.
+	// It must match the agent's DHUNTER_AGENT_TOKEN. Empty disables the
+	// header (the agent then runs with auth off — only for local dev).
+	Token string `yaml:"token"`
 }
 
 // MCPConfig holds tool / transport wiring for MCP servers.
@@ -75,24 +80,32 @@ type AdminConfig struct {
 	BootstrapPassword string `yaml:"bootstrap_password"`
 	Username          string `yaml:"username"`
 	Token             string `yaml:"token"`
+	// ForceResetPassword makes bootstrap_password OVERWRITE the persisted
+	// credential hash on next boot. This is the recovery path for a lost
+	// password: set bootstrap_password + force_reset_password: true,
+	// restart, then remove the flag. It deliberately does NOT auto-generate
+	// a password — without an explicit bootstrap_password the server fails
+	// fast instead of silently rotating the admin credential.
+	ForceResetPassword bool `yaml:"force_reset_password"`
 }
 
 // Default returns sane defaults so an empty YAML is still bootable.
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:                8080,
+			Port:                13343,
 			Host:                "127.0.0.1",
 			SSEKeepaliveSeconds: 15,
 			AllowedOrigins:      []string{},
 		},
 		Agent: AgentConfig{
 			PythonURL: "http://127.0.0.1:9100",
+			Token:     "",
 		},
 		MCP: MCPConfig{
 			WebHunter: WebHunterConfig{
 				URL:   "http://127.0.0.1:9124/message",
-				Token: "dhunter-mcp-please-change-me",
+				Token: "",
 			},
 		},
 		LLM: LLMConfig{
@@ -108,7 +121,11 @@ func Default() *Config {
 		Admin: AdminConfig{
 			BootstrapPassword: "",
 			Username:          "admin",
-			Token:             "dhunter-admin-please-change-me",
+			// Token intentionally EMPTY: the server generates a random token
+			// on first boot and persists it, so a fresh checkout never runs
+			// with a well-known static credential. Set it in YAML/env to pin
+			// a specific value (e.g. an ops-managed secret).
+			Token: "",
 		},
 	}
 }
@@ -158,6 +175,12 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("DHUNTER_AGENT_URL"); v != "" {
 		cfg.Agent.PythonURL = v
 	}
+	if v := os.Getenv("DHUNTER_AGENT_TOKEN"); v != "" {
+		cfg.Agent.Token = v
+	}
+	if v := os.Getenv("DHUNTER_MCP_TOKEN"); v != "" {
+		cfg.MCP.WebHunter.Token = v
+	}
 	if v := os.Getenv("DHUNTER_LLM_API_KEY"); v != "" {
 		cfg.LLM.APIKey = v
 	}
@@ -170,6 +193,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("DHUNTER_ADMIN_BOOTSTRAP_PASSWORD"); v != "" {
 		cfg.Admin.BootstrapPassword = v
 	}
+	if v := os.Getenv("DHUNTER_ADMIN_FORCE_PASSWORD"); v == "1" || strings.EqualFold(v, "true") {
+		cfg.Admin.ForceResetPassword = true
+	}
 }
 
 // normalize fills in any zero-valued fields the YAML forgot and resolves
@@ -178,7 +204,7 @@ func applyEnvOverrides(cfg *Config) {
 // to the process cwd (legacy behavior).
 func (c *Config) normalize(anchorDir string) {
 	if c.Server.Port == 0 {
-		c.Server.Port = 8080
+		c.Server.Port = 13343
 	}
 	if c.Server.Host == "" {
 		c.Server.Host = "127.0.0.1"
@@ -198,9 +224,10 @@ func (c *Config) normalize(anchorDir string) {
 	if c.Storage.SQLitePath == "" {
 		c.Storage.SQLitePath = "./data/dhunter.db"
 	}
-	if c.Admin.Token == "" {
-		c.Admin.Token = "dhunter-admin-please-change-me"
-	}
+	// The admin token is NOT defaulted here: an empty value means "generate a
+	// random one and persist it" (handled by cmd/dhunter-server), never a
+	// hardcoded static default. Same for the MCP token — empty just means the
+	// server's probe sends no auth header.
 	if c.Admin.Username == "" {
 		c.Admin.Username = "admin"
 	}

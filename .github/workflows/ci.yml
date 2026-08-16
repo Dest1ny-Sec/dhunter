@@ -32,6 +32,6 @@ jobs:
           pip install -r agents/requirements.txt pytest
           cd agents && pytest tests/ -q
 
-      - name: Frontend build
+      - name: Frontend test + build
         run: |
-          cd frontend && npm ci && npm run build
+          cd frontend && npm ci && npm test && npm run build

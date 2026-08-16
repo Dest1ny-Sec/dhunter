@@ -14,6 +14,10 @@ import (
 const (
 	KeyAdminUsername     = "admin_username"
 	KeyAdminPasswordHash = "admin_password_hash"
+	// KeyAdminToken persists an auto-generated admin bearer token so manual
+	// (non-script) starts keep the same token across restarts instead of
+	// regenerating it every boot.
+	KeyAdminToken = "admin_token"
 )
 
 // AuthHandler handles /api/auth/login, /api/auth/change and the admin

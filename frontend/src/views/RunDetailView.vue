@@ -2,6 +2,8 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Marked } from 'marked'
+import DOMPurify from 'dompurify'
+import { escapeHtml } from '../utils/format'
 // highlight.js core + a small language set keeps the 1.3MB RunDetail bundle
 // lean — full hljs ships ~30 languages the report never uses.
 import hljs from 'highlight.js/lib/core'
@@ -80,7 +82,16 @@ md.use({
 
 const reportHtml = computed(() => {
   if (!report.value) return ''
-  try { return md.parse(report.value) as string } catch { return `<pre>${report.value}</pre>` }
+  try {
+    // The report/evidence is largely copied from target responses, which are
+    // attacker-influenced data. marked passes raw HTML through unchanged, so
+    // every render MUST go through DOMPurify — otherwise a target page that
+    // makes the agent copy <img onerror=...> into a finding executes in the
+    // admin's browser (stored XSS → token theft).
+    return DOMPurify.sanitize(md.parse(report.value) as string)
+  } catch {
+    return `<pre>${escapeHtml(report.value)}</pre>`
+  }
 })
 
 const toolCalls = computed(() =>
@@ -176,9 +187,23 @@ function connectSSE() {
   es.onmessage = (msg) => {
     try {
       const parsed = JSON.parse(msg.data)
-      const ev: SSEEvent = { type: parsed.type || parsed.event || 'message', data: parsed.data ?? parsed, ts: parsed.ts || Date.now() }
+      // The bridge emits both `type` and `event_type` (Go-side wire name);
+      // accept all three so a mismatched field can never silently turn
+      // every event into an untyped 'message' again.
+      const ev: SSEEvent = { type: parsed.type || parsed.event || parsed.event_type || 'message', data: parsed.data ?? parsed, ts: parsed.ts || Date.now() }
       events.value.push(ev)
+      // Long runs stream one event per delta chunk — cap the in-memory list
+      // so the live-stream tab doesn't grind to a halt after thousands of
+      // events. The DB keeps the full history (tool_calls / messages).
+      if (events.value.length > 1000) {
+        events.value.splice(0, events.value.length - 1000)
+      }
       if (ev.type === 'run_status' && ev.data?.status) status.value = ev.data.status
+      if (ev.type === 'run_done') {
+        const st = ev.data?.run_status || ev.data?.status
+        if (st) status.value = st
+        if (sseRef.value) { sseRef.value.close(); sseRef.value = null }
+      }
       if (ev.type === 'run_complete' || ev.type === 'run_finished') {
         status.value = 'completed'
         if (typeof ev.data === 'object' && ev.data?.report) report.value = ev.data.report
@@ -187,7 +212,7 @@ function connectSSE() {
       if (ev.type === 'run_failed' || ev.type === 'error') status.value = 'failed'
       if (ev.type === 'run_cancelled') status.value = 'cancelled'
       // terminal — stop reconnecting
-      if (ev.type === 'run_complete' || ev.type === 'run_finished' || ev.type === 'run_failed' || ev.type === 'error' || ev.type === 'run_cancelled') {
+      if (ev.type === 'run_complete' || ev.type === 'run_finished' || ev.type === 'run_failed' || ev.type === 'error' || ev.type === 'run_cancelled' || ev.type === 'run_done') {
         if (sseRef.value) { sseRef.value.close(); sseRef.value = null }
       }
       if (ev.type === 'vulnerability' || ev.type === 'vuln') vulns.value.push(ev.data)
@@ -255,6 +280,13 @@ watch(runId, async (v) => {
     </div>
 
     <div v-if="error" style="color: var(--danger)">{{ error }}</div>
+
+    <!-- run-level outcome: convergence summary, failure reason, or the
+         time/budget-stop notice — shown prominently so a failed run isn't
+         a silent badge flip. -->
+    <div v-if="runInfo?.summary" class="card" style="padding: 10px 14px; margin: 6px 0 10px; font-size: 13px">
+      <span class="muted" style="margin-right: 8px">{{ ['failed', 'cancelled'].includes(status) ? '✕' : 'ℹ' }}</span>{{ runInfo.summary }}
+    </div>
 
     <div class="tabs">
       <button :class="['tab', { active: tab === 'results' }]" @click="tab = 'results'">成果</button>

@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
+import { onEnter } from '../utils/ime'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 
@@ -101,7 +102,7 @@ function snippet(c: string): string {
         v-model="q"
         placeholder="输入关键词，例如：验证码 / SQLi / checkNeedCaptcha / isNeed…"
         style="flex: 1; max-width: 520px"
-        @keyup.enter="search"
+        @keyup.enter="onEnter(search)"
       />
       <UiButton variant="primary" :disabled="searching" @click="search">
         {{ searching ? '搜索中…' : '搜索' }}

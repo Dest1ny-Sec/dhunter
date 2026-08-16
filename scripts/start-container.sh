@@ -28,6 +28,7 @@ start_mcp() {
 start_agent() {
   cd "$AGENT_DIR"
   DHUNTER_LLM_KEY="$LLM_KEY" \
+  DHUNTER_AGENT_TOKEN="$PLAT_TOKEN" \
   DHUNTER_MCP_URL="http://127.0.0.1:$MCP_PORT/message" \
   DHUNTER_MCP_TOKEN="$MCP_TOKEN" \
   DHUNTER_BACKEND_URL="http://127.0.0.1:$PLAT_PORT" \
@@ -40,6 +41,8 @@ start_agent() {
 start_server() {
   cd /app
   DHUNTER_ADMIN_TOKEN="$PLAT_TOKEN" \
+  DHUNTER_AGENT_TOKEN="$PLAT_TOKEN" \
+  DHUNTER_MCP_TOKEN="$MCP_TOKEN" \
     "$BIN/dhunter-server" --config /app/configs/dhunter.yaml --http &
   SERVER_PID=$!
   echo "  [server] pid $SERVER_PID"

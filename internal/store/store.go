@@ -51,6 +51,11 @@ type Run struct {
 	Summary    string     `json:"summary"`
 	StartedAt  time.Time  `json:"started_at"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	// TargetValue / TargetName are denormalized from the targets table so
+	// list views can show "which target was tested" without a second query.
+	// Populated by List / ListByTarget / Get (LEFT JOIN).
+	TargetValue string `json:"target_value,omitempty"`
+	TargetName  string `json:"target_name,omitempty"`
 	// Cumulative LLM token usage across the run.
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
@@ -373,10 +378,12 @@ func (s *RunStore) AddTokens(ctx context.Context, runID string, in, out, cc, cr,
 // Get fetches a run by ID.
 func (s *RunStore) Get(ctx context.Context, id string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, target_id, objective, status, summary, started_at, ended_at,
-			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-			reasoning_tokens
-		 FROM runs WHERE id = ?`, id)
+		`SELECT r.id, r.target_id, r.objective, r.status, r.summary, r.started_at, r.ended_at,
+		        t.value, t.name,
+		        r.input_tokens, r.output_tokens, r.cache_creation_input_tokens, r.cache_read_input_tokens,
+		        r.reasoning_tokens
+		 FROM runs r LEFT JOIN targets t ON t.id = r.target_id
+		 WHERE r.id = ?`, id)
 	return scanRun(row)
 }
 
@@ -386,10 +393,12 @@ func (s *RunStore) ListByTarget(ctx context.Context, targetID string, limit int)
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, target_id, objective, status, summary, started_at, ended_at,
-			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-			reasoning_tokens
-		 FROM runs WHERE target_id = ? ORDER BY started_at DESC LIMIT ?`, targetID, limit)
+		`SELECT r.id, r.target_id, r.objective, r.status, r.summary, r.started_at, r.ended_at,
+		        t.value, t.name,
+		        r.input_tokens, r.output_tokens, r.cache_creation_input_tokens, r.cache_read_input_tokens,
+		        r.reasoning_tokens
+		 FROM runs r LEFT JOIN targets t ON t.id = r.target_id
+		 WHERE r.target_id = ? ORDER BY r.started_at DESC LIMIT ?`, targetID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -411,10 +420,12 @@ func (s *RunStore) List(ctx context.Context, limit int) ([]*Run, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, target_id, objective, status, summary, started_at, ended_at,
-			input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-			reasoning_tokens
-		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit)
+		`SELECT r.id, r.target_id, r.objective, r.status, r.summary, r.started_at, r.ended_at,
+		        t.value, t.name,
+		        r.input_tokens, r.output_tokens, r.cache_creation_input_tokens, r.cache_read_input_tokens,
+		        r.reasoning_tokens
+		 FROM runs r LEFT JOIN targets t ON t.id = r.target_id
+		 ORDER BY r.started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +445,9 @@ func scanRun(r rowScanner) (*Run, error) {
 	var run Run
 	var startedMs int64
 	var endedMs sql.NullInt64
+	var targetValue, targetName sql.NullString
 	if err := r.Scan(&run.ID, &run.TargetID, &run.Objective, &run.Status, &run.Summary, &startedMs, &endedMs,
+		&targetValue, &targetName,
 		&run.InputTokens, &run.OutputTokens, &run.CacheCreationInputTokens, &run.CacheReadInputTokens,
 		&run.ReasoningTokens); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -446,6 +459,12 @@ func scanRun(r rowScanner) (*Run, error) {
 	if endedMs.Valid {
 		t := time.UnixMilli(endedMs.Int64).UTC()
 		run.EndedAt = &t
+	}
+	if targetValue.Valid {
+		run.TargetValue = targetValue.String
+	}
+	if targetName.Valid {
+		run.TargetName = targetName.String
 	}
 	return &run, nil
 }

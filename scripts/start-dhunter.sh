@@ -71,6 +71,7 @@ start_all() {
   else
     cd "$AGENT_DIR"
     DHUNTER_LLM_KEY="$LLM_KEY" \
+    DHUNTER_AGENT_TOKEN="$PLAT_TOKEN" \
     DHUNTER_MCP_URL="http://127.0.0.1:$MCP_PORT/message" \
     DHUNTER_MCP_TOKEN="$MCP_TOKEN" \
     DHUNTER_BACKEND_URL="http://127.0.0.1:$PLAT_PORT" \
@@ -85,6 +86,8 @@ start_all() {
     echo "[skip] Dhunter :$PLAT_PORT 已在跑"
   else
     DHUNTER_ADMIN_TOKEN="$PLAT_TOKEN" \
+    DHUNTER_AGENT_TOKEN="$PLAT_TOKEN" \
+    DHUNTER_MCP_TOKEN="$MCP_TOKEN" \
       nohup "$PLAT_BIN" --config "$ROOT/configs/dhunter.yaml" --http > /tmp/dhunter-server.log 2>&1 &
     echo "[ok]   Dhunter :$PLAT_PORT (PID $!)"
   fi

@@ -5,11 +5,17 @@ server:
 
 agent:
   python_url: "http://127.0.0.1:9100"
+  # 发给 Python agent 的 Bearer token（必须与 agent 进程的 DHUNTER_AGENT_TOKEN 一致）。
+  # 留空 = 不发送（agent 侧未配置鉴权时仅限本地开发）。
+  # 推荐：用启动脚本自动生成，或用 DHUNTER_AGENT_TOKEN 环境变量覆盖。
+  token: ""
 
 mcp:
   webhunter:
     url: "http://127.0.0.1:9124/message"
-    token: "dhunter-mcp-please-change-me"
+    # dhunter-mcp 的 Bearer token（设置页探测工具列表用）。留空 = 不发送。
+    # 推荐：用启动脚本自动生成，或用 DHUNTER_MCP_TOKEN 环境变量覆盖。
+    token: ""
 
 llm:
   provider: anthropic
@@ -27,4 +33,6 @@ admin:
   username: "admin"
   # 首次启动的初始密码（会持久化，之后可在设置页修改）。留空则随机生成并在横幅展示。
   bootstrap_password: ""
-  token: "dhunter-admin-please-change-me"
+  # 平台 API 的 admin Bearer token。留空则首次启动自动生成随机 token 并持久化
+  # （重启不变，横幅展示）。也可用 DHUNTER_ADMIN_TOKEN 环境变量显式指定。
+  token: ""
