@@ -25,10 +25,10 @@ defineProps<{ title?: string; pad?: boolean }>()
 }
 .ui-card-head {
   display: flex; align-items: center; gap: 12px;
-  padding: 14px 18px;
+  padding: 16px 22px;
   border-bottom: 1px solid var(--border);
 }
 .ui-card-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
-.ui-card-body { padding: 18px; }
+.ui-card-body { padding: 22px; }
 .no-pad .ui-card-body { padding: 0; }
 </style>

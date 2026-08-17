@@ -300,7 +300,7 @@ code:not(pre code) {
 }
 .muted { color: var(--text-dim); }
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.col { display: flex; flex-direction: column; gap: 12px; }
+.col { display: flex; flex-direction: column; gap: 22px; }
 .spacer { flex: 1; }
 
 /* === app shell === */
