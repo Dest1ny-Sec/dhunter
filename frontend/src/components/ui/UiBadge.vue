@@ -47,13 +47,20 @@ const cls = computed(() => {
 .b-low { color: var(--sev-low); background: rgba(6,182,212,0.08); border-color: rgba(6,182,212,0.3); }
 .b-info { color: var(--sev-info); }
 
-/* status */
-.b-running, .b-queued, .b-claimed, .b-open { color: var(--accent); background: rgba(124,102,255,0.1); border-color: rgba(124,102,255,0.35); }
-.b-paused { color: var(--stellar-bright); background: rgba(147,197,253,0.08); border-color: rgba(147,197,253,0.35); }
-.b-success, .b-completed, .b-confirmed { color: var(--ok); background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.35); }
-.b-failed { color: var(--danger); background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.35); }
+/* status — multi-hue, not AI purple.
+   running/queued/claimed/open → aurora cyan (active motion)
+   success/confirmed          → green
+   failed                     → red
+   pending                    → text-dim
+   cancelled                  → amber */
+.b-running, .b-queued, .b-claimed, .b-open { color: var(--aurora-bright); background: rgba(95, 200, 212, 0.1); border-color: rgba(95, 200, 212, 0.36); }
+.b-running .b-dot, .b-queued .b-dot, .b-claimed .b-dot, .b-open .b-dot { box-shadow: 0 0 6px currentColor; animation: badge-pulse 2s ease-in-out infinite; }
+.b-paused { color: var(--stellar-bright); background: rgba(125, 146, 232, 0.1); border-color: rgba(125, 146, 232, 0.3); }
+.b-success, .b-completed, .b-confirmed { color: var(--ok); background: rgba(95, 200, 154, 0.1); border-color: rgba(95, 200, 154, 0.32); }
+.b-failed { color: var(--danger); background: rgba(226, 100, 114, 0.1); border-color: rgba(226, 100, 114, 0.32); }
 .b-pending { color: var(--text-dim); }
-.b-cancelled { color: var(--warn); background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.35); }
+.b-cancelled { color: var(--warn); background: rgba(217, 168, 97, 0.1); border-color: rgba(217, 168, 97, 0.3); }
 .b-dismissed { color: var(--text-faint); }
-.b-concluded { color: var(--ok); background: rgba(16,185,129,0.08); }
+.b-concluded { color: var(--ok); background: rgba(95, 200, 154, 0.08); }
+@keyframes badge-pulse { 50% { opacity: 0.45; } }
 </style>

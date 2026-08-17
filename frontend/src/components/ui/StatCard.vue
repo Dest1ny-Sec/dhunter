@@ -23,7 +23,7 @@ defineEmits<{ (e: 'arrow'): void }>()
     </div>
     <div v-else-if="icon" class="hero-icon">{{ icon }}</div>
     <div class="hero-label">{{ label }}</div>
-    <div class="hero-value">{{ value }}</div>
+    <div class="hero-value" :class="{ 'is-zero': value === 0 || value === '0' }">{{ value }}</div>
     <div v-if="foot" class="hero-foot">{{ foot }}</div>
     <div v-if="sparkData && sparkData.length > 1" class="hero-spark">
       <Sparkline

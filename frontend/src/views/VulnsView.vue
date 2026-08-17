@@ -10,13 +10,14 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import Icon from '../components/icons/Icon.vue'
 
 interface Vuln {
-  id: string; run_id?: string; target?: string; url?: string; title?: string; name?: string; severity: string;
+  id: string; run_id?: string; target_id?: string; target?: string; url?: string; title?: string; name?: string; severity: string;
   status?: string; evidence?: any; description?: string; impact?: string; recommendation?: string; reproduction?: string;
 }
 
 const router = useRouter()
 const vulns = ref<Vuln[]>([])
 const runs = ref<any[]>([])
+const targets = ref<any[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
 const filterSeverity = ref('')
@@ -26,6 +27,28 @@ const detail = ref<Vuln | null>(null)
 
 const severities = ['critical', 'high', 'medium', 'low', 'info']
 const statuses = ['confirmed', 'dismissed', 'pending', 'open']
+
+// Resolve the human-readable target name for a vulnerability by walking
+// run_id → run → target_id → target. Falls back to the raw target/url on
+// the vuln record, or the target_id slice, or a final "—".
+function targetName(v: Vuln): string {
+  if (v.target && !/^[a-z0-9-]{8,}$/i.test(v.target)) return v.target  // not a bare id
+  if (v.run_id) {
+    const run = runs.value.find((r) => r.id === v.run_id)
+    if (run?.target_value) return run.target_value
+    if (run?.target_id) {
+      const t = targets.value.find((x) => x.id === run.target_id)
+      if (t) return t.name || t.value || t.normalized || t.id.slice(0, 8)
+    }
+  }
+  if (v.target_id) {
+    const t = targets.value.find((x) => x.id === v.target_id)
+    if (t) return t.name || t.value || t.normalized || t.id.slice(0, 8)
+  }
+  if (v.target) return v.target.slice(0, 8)
+  if (v.url) return v.url
+  return '—'
+}
 
 const filtered = computed(() => vulns.value.filter((v) => {
   if (filterSeverity.value && v.severity?.toLowerCase() !== filterSeverity.value) return false
@@ -46,11 +69,12 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [vRes, rRes] = await Promise.all([
-      api.get('/vulnerabilities'), api.get('/runs'),
+    const [vRes, rRes, tRes] = await Promise.all([
+      api.get('/vulnerabilities'), api.get('/runs'), api.get('/targets'),
     ])
     vulns.value = Array.isArray(vRes.data) ? vRes.data : vRes.data?.vulnerabilities || []
     runs.value = Array.isArray(rRes.data) ? rRes.data : rRes.data?.runs || []
+    targets.value = Array.isArray(tRes.data) ? tRes.data : tRes.data?.targets || []
   } catch (e: any) {
     error.value = e?.response?.data?.error || e?.message || '加载失败，请检查后端服务是否运行'
   } finally { loading.value = false }
@@ -63,7 +87,7 @@ onMounted(load)
   <div class="col">
     <div class="vulns-head">
       <div>
-        <h2 style="font-size: 20px; font-weight: 600; margin: 0">漏洞库</h2>
+        <h2 class="page-title">漏洞库</h2>
         <div class="muted" style="font-size: 13px; margin-top: 2px">共 {{ confirmedCount }} 个已确认漏洞，跨所有授权目标</div>
       </div>
       <button @click="load" :disabled="loading" aria-label="刷新">
@@ -104,9 +128,9 @@ onMounted(load)
     </div>
 
     <div v-else-if="filtered.length" class="card" style="padding: 0">
-      <table>
+      <table class="stagger">
         <thead>
-          <tr><th>严重度</th><th>标题</th><th>目标</th><th>状态</th><th></th></tr>
+          <tr><th>严重度</th><th>标题</th><th>目标</th><th>运行</th><th>状态</th><th></th></tr>
         </thead>
         <tbody>
           <tr v-for="v in filtered" :key="v.id">
@@ -115,9 +139,20 @@ onMounted(load)
               <div style="font-size: 13px">{{ v.title || v.name || v.id }}</div>
               <div v-if="v.description" class="muted" style="font-size: 11px; margin-top: 2px">{{ v.description.slice(0, 140) }}{{ v.description.length > 140 ? '…' : '' }}</div>
             </td>
-            <td class="muted"><code style="font-size: 11px">{{ v.target || v.url || '—' }}</code></td>
+            <td>
+              <span class="target-cell" @click="v.run_id && router.push(`/runs/${v.run_id}`)" :class="{ link: !!v.run_id }">
+                {{ targetName(v) }}
+              </span>
+            </td>
+            <td>
+              <a v-if="v.run_id" class="run-id" :href="`/runs/${v.run_id}`" @click.prevent="router.push(`/runs/${v.run_id}`)">
+                <Icon name="play" :size="11" />
+                {{ v.run_id.slice(0, 8) }}
+              </a>
+              <span v-else class="muted">—</span>
+            </td>
             <td><UiBadge kind="status" :value="v.status || 'open'" /></td>
-            <td><button style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="detail = v">详情</button></td>
+            <td><button class="ghost-btn" @click="detail = v">详情</button></td>
           </tr>
         </tbody>
       </table>
@@ -167,6 +202,48 @@ onMounted(load)
 .sk-list { display: flex; flex-direction: column; gap: 8px; }
 .detail .sec { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin: 14px 0 6px; }
 .detail p { font-size: 13px; line-height: 1.6; }
+
+/* clickable target cell — was just "—" before, now shows project name and is a link */
+.target-cell { font-size: 12.5px; color: var(--text-dim); }
+.target-cell.link { color: var(--text); cursor: pointer; transition: color 0.15s; }
+.target-cell.link:hover { color: var(--stellar-bright); text-decoration: underline; text-decoration-color: rgba(125, 146, 232, 0.4); text-underline-offset: 3px; }
+
+/* run id — small chip-like link */
+.run-id {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(125, 146, 232, 0.08);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.run-id:hover {
+  color: var(--stellar-bright);
+  background: rgba(125, 146, 232, 0.16);
+  border-color: var(--border-bright);
+}
+.run-id > svg { opacity: 0.6; }
+
+/* ghost button for 详情 — soft, doesn't fight the row */
+.ghost-btn {
+  min-height: 28px; padding: 0 12px; font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ghost-btn:hover {
+  color: var(--text);
+  border-color: var(--border-bright);
+  background: rgba(125, 146, 232, 0.08);
+}
 
 .error-state {
   display: flex; align-items: flex-start; gap: 12px;

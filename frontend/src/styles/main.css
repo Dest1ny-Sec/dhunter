@@ -85,10 +85,16 @@
   --shadow-2: 0 8px 32px rgba(3, 6, 26, 0.6);
   --shadow-glow: 0 4px 24px rgba(125, 146, 232, 0.18);
 
-  /* fonts */
-  --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* fonts
+     - --font-serif: Fraunces (展示体, 标题/品牌/大字数字 — 有性格, 跟星空相称)
+     - --font-sans : Space Grotesk (UI/正文 — 微几何感, 比 Inter 有性格)
+     - --font-mono : JetBrains Mono */
+  --font-serif: 'Fraunces', 'Times New Roman', Georgia, serif;
+  --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+  /* legacy aliases — keep existing code working */
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -423,23 +429,20 @@ code:not(pre code) {
   letter-spacing: -0.01em;
   font-family: var(--font-display);
 }
+/* brand mark — now hosts a CSS-only "double star ring" SVG (BrandMark.vue).
+   The old gradient box is kept as a subtle backdrop so the logo still reads
+   on very dark backgrounds, but the brand is the SVG itself. */
 .brand-mark {
-  width: 32px; height: 32px; border-radius: 8px;
-  background: linear-gradient(135deg, var(--stellar-bright) 0%, var(--stellar-dim) 60%, var(--nebula-dim) 100%);
-  display: flex; align-items: center; justify-content: center;
-  color: #fff;
-  box-shadow:
-    0 0 0 1px rgba(163, 180, 255, 0.3),
-    0 4px 18px rgba(125, 146, 232, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+  flex-shrink: 0;
 }
 .brand-mark::after {
   content: ''; position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 55%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 55%);
   pointer-events: none;
+  border-radius: inherit;
 }
-.brand-mark svg { width: 18px; height: 18px; position: relative; z-index: 1; }
 
 /* === nav (collapsible) === */
 .nav-group { margin-bottom: 6px; }
@@ -664,8 +667,11 @@ code:not(pre code) {
   position: absolute;
   inset: -15%;
   background:
-    radial-gradient(ellipse 60% 50% at 50% 50%, rgba(125, 146, 232, 0.10), transparent 65%),
-    radial-gradient(ellipse 35% 25% at 50% 50%, rgba(95, 200, 212, 0.04), transparent 70%);
+    /* two centered radials — symmetric, no color bias */
+    radial-gradient(ellipse 55% 45% at 50% 48%, rgba(125, 146, 232, 0.18), transparent 65%),
+    radial-gradient(ellipse 30% 22% at 50% 50%, rgba(95, 200, 212, 0.08), transparent 70%),
+    /* hint of warm color, also centered so it doesn't split the page */
+    radial-gradient(ellipse 18% 14% at 50% 50%, rgba(232, 200, 121, 0.05), transparent 75%);
   filter: blur(60px);
   pointer-events: none;
   animation: nebula 70s ease-in-out infinite;
@@ -768,9 +774,28 @@ code:not(pre code) {
   50%      { opacity: 1;   transform: scale(1.4); }
 }
 /* global field/feature rise (referenced by .login-features in main.css) */
+/* === list stagger — applied to table tbody rows & card grids === */
 @keyframes lf-rise {
   to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
+@keyframes stagger-rise {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.stagger > * {
+  opacity: 0;
+  animation: stagger-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.stagger > *:nth-child(7) { animation-delay: 240ms; }
+.stagger > *:nth-child(8) { animation-delay: 280ms; }
+.stagger > *:nth-child(9) { animation-delay: 320ms; }
+.stagger > *:nth-child(n+10) { animation-delay: 360ms; }
 /* ambient breathing halo behind the card — sibling element to escape the card's stacking context */
 .login-shell > .card-halo {
   position: absolute;
@@ -793,15 +818,61 @@ code:not(pre code) {
   to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
+/* === page title (used on every top-level view) ===
+   Fraunces serif, slight letter-spacing, light weight — gives the
+   "stargaze" cosmos feeling instead of the default sans h2. */
+.page-title {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  color: var(--text);
+  margin: 0;
+  font-feature-settings: 'ss01';
+}
+.page-title-sub {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-top: 4px;
+  letter-spacing: 0.005em;
+}
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;
+  margin-bottom: 4px;
+}
+
+/* === section header (used inside settings) ===
+   Smaller than page-title, mono caption, with hairline divider. */
+.section-title {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 6px 0 -2px;
+  display: flex; align-items: center; gap: 10px;
+}
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+}
+
 /* === brand character stagger === */
 .brand-chars {
   display: inline-flex;
   align-items: baseline;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-family: var(--font-serif);
+  font-size: 30px;
+  font-weight: 500;
+  font-style: normal;
+  letter-spacing: -0.025em;
   color: var(--text);
+  font-feature-settings: 'ss01', 'ss02';
 }
 .brand-chars .ch {
   display: inline-block;
@@ -910,8 +981,8 @@ code:not(pre code) {
 .login-features {
   display: flex;
   gap: 6px;
-  margin-top: 16px;
-  padding-top: 14px;
+  margin-top: 18px;
+  padding-top: 16px;
   border-top: 1px solid rgba(163, 180, 255, 0.08);
   opacity: 0;
   transform: translate3d(0, 8px, 0);
@@ -923,27 +994,41 @@ code:not(pre code) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 6px 4px;
-  font-size: 10.5px;
+  gap: 6px;
+  padding: 7px 4px;
+  font-size: 11px;
   color: var(--text-dim);
-  background: rgba(125, 146, 232, 0.06);
+  background: rgba(125, 146, 232, 0.04);
   border: 1px solid rgba(125, 146, 232, 0.12);
   border-radius: 999px;
-  font-family: var(--font-display);
-  letter-spacing: 0.02em;
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  font-family: var(--font-sans);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
 }
+.login-features .lf-pill::before {
+  /* tiny accent dot — distinct per pill via nth-child */
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.login-features .lf-pill:nth-child(1)::before { background: var(--stellar-bright); box-shadow: 0 0 6px var(--stellar-bright); }
+.login-features .lf-pill:nth-child(2)::before { background: var(--aurora); box-shadow: 0 0 6px var(--aurora); }
+.login-features .lf-pill:nth-child(3)::before { background: var(--star-amber-bright); box-shadow: 0 0 6px var(--star-amber-bright); }
 .login-features .lf-pill:hover {
   background: rgba(125, 146, 232, 0.12);
   border-color: rgba(125, 146, 232, 0.3);
   color: var(--text);
+  transform: translateY(-1px);
 }
 .login-features .lf-pill .lf-ico {
   display: inline-flex;
   align-items: center;
   color: var(--stellar-bright);
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 /* === tabs === */
@@ -1042,22 +1127,37 @@ code:not(pre code) {
   background: linear-gradient(90deg, transparent, var(--accent-line, rgba(125, 146, 232, 0.55)), transparent);
 }
 .stat-hero .hero-label {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-faint);
-  font-family: var(--font-display);
-  letter-spacing: 0.12em;
+  font-family: var(--font-sans);
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  font-weight: 500;
+  font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.stat-hero .hero-label::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent-line, var(--stellar));
+  box-shadow: 0 0 8px var(--accent-line, var(--stellar));
+  flex-shrink: 0;
 }
 .stat-hero .hero-value {
-  font-size: 34px;
-  font-weight: 600;
+  font-size: 36px;
+  font-weight: 400;
   color: var(--text);
-  letter-spacing: -0.025em;
-  font-family: var(--font-display);
-  margin-top: 12px;
+  letter-spacing: -0.03em;
+  font-family: var(--font-serif);
+  margin-top: 14px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  font-feature-settings: 'ss01', 'tnum';
+}
+.stat-hero .hero-value.is-zero {
+  color: var(--text-faint);
+  font-weight: 300;
+  font-size: 32px;
 }
 .stat-hero .hero-foot {
   font-size: 11px;
@@ -1124,13 +1224,16 @@ code:not(pre code) {
 .panel-card-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-soft);
 }
 .panel-card-title {
-  font-size: 14.5px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 500;
   color: var(--text);
-  font-family: var(--font-display);
-  letter-spacing: -0.005em;
+  font-family: var(--font-serif);
+  letter-spacing: -0.018em;
+  font-feature-settings: 'ss01';
 }
 .panel-card-actions { display: flex; align-items: center; gap: 8px; }
 

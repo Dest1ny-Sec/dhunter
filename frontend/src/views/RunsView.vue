@@ -71,7 +71,7 @@ onMounted(load)
   <div class="col">
     <div class="runs-head">
       <div>
-        <h2 style="font-size: 20px; font-weight: 600; margin: 0">运行记录</h2>
+        <h2 class="page-title">运行记录</h2>
         <div class="muted" style="font-size: 13px; margin-top: 2px">共 {{ runs.length }} 次评估</div>
       </div>
       <button @click="load" :disabled="loading" aria-label="刷新">
@@ -93,28 +93,40 @@ onMounted(load)
       </div>
     </div>
     <div v-else-if="runs.length" class="card" style="padding: 0">
-      <table>
+      <table class="runs-table stagger">
         <thead>
           <tr>
             <th>状态</th>
             <th>目标</th>
+            <th>Run</th>
             <th>耗时</th>
             <th>Tokens</th>
             <th>开始时间</th>
-            <th>摘要</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in runs" :key="r.id" style="cursor: pointer" @click="router.push(`/runs/${r.id}`)">
+          <tr v-for="r in runs" :key="r.id">
             <td><UiBadge kind="status" :value="r.status" :dot="true" /></td>
             <td>
-              <code style="font-size: 12px">{{ r.id.slice(0, 8) }}</code>
-              <span class="muted" style="font-size: 11px; margin-left: 6px">{{ r.target_value || r.target_id || '' }}</span>
+              <span class="target-value" @click="router.push(`/targets/${r.target_id}/runs`)" :class="{ link: !!r.target_id }">
+                {{ r.target_value || r.target_id?.slice(0, 8) || '—' }}
+              </span>
             </td>
-            <td class="muted" style="font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums">{{ duration(r) }}</td>
-            <td class="muted" style="font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums">{{ fmtN(tokens(r)) }}</td>
-            <td class="muted" style="font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums">{{ fmtTime(r.started_at) }}</td>
-            <td class="muted" style="font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ r.summary }}</td>
+            <td>
+              <a class="run-id-chip" :href="`/runs/${r.id}`" @click.prevent="router.push(`/runs/${r.id}`)">
+                <Icon name="play" :size="11" />
+                {{ r.id.slice(0, 8) }}
+              </a>
+            </td>
+            <td class="num">{{ duration(r) }}</td>
+            <td class="num">{{ fmtN(tokens(r)) }}</td>
+            <td class="num">{{ fmtTime(r.started_at) }}</td>
+            <td>
+              <button class="row-cta" @click="router.push(`/runs/${r.id}`)">
+                <Icon name="arrow-right" :size="13" />
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -134,6 +146,59 @@ onMounted(load)
 <style scoped>
 .runs-head { display: flex; justify-content: space-between; align-items: flex-start; }
 .sk-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* table — slightly tighter, with hover row */
+.runs-table { width: 100%; }
+.runs-table th, .runs-table td { padding: 14px 16px; font-size: 12.5px; }
+.runs-table th {
+  color: var(--text-faint);
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  background: rgba(10, 17, 36, 0.4);
+}
+.runs-table tbody tr {
+  border-bottom: 1px solid var(--border-soft);
+  transition: background 0.15s;
+}
+.runs-table tbody tr:hover { background: rgba(125, 146, 232, 0.05); }
+.runs-table tbody tr:last-child { border-bottom: none; }
+.runs-table .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 12px; }
+.runs-table .target-value { font-size: 13px; color: var(--text); }
+.runs-table .target-value.link { cursor: pointer; transition: color 0.15s; }
+.runs-table .target-value.link:hover { color: var(--stellar-bright); text-decoration: underline; text-decoration-color: rgba(125,146,232,0.4); text-underline-offset: 3px; }
+
+.run-id-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(125, 146, 232, 0.08);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.run-id-chip:hover { color: var(--stellar-bright); background: rgba(125, 146, 232, 0.16); border-color: var(--border-bright); }
+.run-id-chip > svg { opacity: 0.6; }
+
+.row-cta {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.row-cta:hover { color: var(--text); border-color: var(--border-bright); background: rgba(125, 146, 232, 0.08); }
+
 .error-state {
   display: flex; align-items: flex-start; gap: 12px;
   padding: 16px 18px;

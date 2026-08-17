@@ -294,8 +294,8 @@ onBeforeUnmount(() => {
     </div>
     <div class="eng-head">
       <div>
-        <h2 style="font-size: 20px; font-weight: 600; margin: 0">授权目标</h2>
-        <div class="muted" style="font-size: 13px; margin-top: 2px">已授权 AI 进行侦察和测试的目标资产</div>
+        <h2 class="page-title">授权目标</h2>
+        <div class="muted page-title-sub" style="font-size: 13px; margin-top: 2px">已授权 AI 进行侦察和测试的目标资产</div>
       </div>
       <UiButton variant="primary" size="md" @click="showForm = !showForm">
         <Icon v-if="!showForm" name="plus" :size="14" />
@@ -409,7 +409,7 @@ onBeforeUnmount(() => {
         <UiSkeleton v-for="i in 4" :key="i" block height="156px" radius="12px" />
       </div>
     </div>
-    <div v-else-if="targets.length" class="eng-grid">
+    <div v-else-if="targets.length" class="eng-grid stagger">
       <div v-for="t in targets" :key="t.id" class="eng-card card">
         <div class="eng-card-head">
           <span class="pill">{{ t.type || 'auto' }}</span>

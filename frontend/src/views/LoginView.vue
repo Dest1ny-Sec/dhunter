@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import UiButton from '../components/ui/UiButton.vue'
 import Icon from '../components/icons/Icon.vue'
+import BrandMark from '../components/icons/BrandMark.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -64,7 +65,7 @@ async function submit() {
     <div class="login-card card">
       <div class="login-brand">
         <div class="brand-mark">
-          <img src="/logo-512.png" alt="Dhunter" style="width: 100%; height: 100%; object-fit: cover; border-radius: 14px" />
+          <BrandMark :size="56" :glow="true" :animate="true" />
         </div>
         <h1 class="brand-chars" aria-label="Dhunter">
           <span

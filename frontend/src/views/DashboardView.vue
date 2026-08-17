@@ -193,7 +193,7 @@ onBeforeUnmount(() => {
             <div class="bar"><span class="bar-label">缓存</span><span class="bar-num">{{ fmtN(runs.reduce((s, r) => s + (r.cache_read_input_tokens || 0), 0)) }}</span></div>
           </div>
           <div class="hero-tokens-spark" v-if="!loading">
-            <AreaChart :data="tokenSpark" :width="380" :height="80" :y-steps="2" stroke-color="#a78bfa" fill-color="#7d92e8" />
+            <AreaChart :data="tokenSpark" :width="380" :height="80" :y-steps="2" stroke-color="#8adde6" fill-color="#5fc8d4" />
           </div>
         </div>
       </div>
@@ -204,7 +204,7 @@ onBeforeUnmount(() => {
           :value="targets.length"
           icon-name="target"
           :foot="loading ? '加载中…' : '当前可发起 AI 渗透测试'"
-          accent="#5fc8d4"
+          accent="#9b8ce8"
           @arrow="goTargets"
         />
       </div>
@@ -214,7 +214,7 @@ onBeforeUnmount(() => {
           :value="runningRuns"
           icon-name="play"
           :foot="runningRuns > 0 ? '实时监控中' : '当前空闲'"
-          accent="#a78bfa"
+          accent="#5fc8d4"
           @arrow="goRuns"
         />
       </div>
@@ -403,24 +403,32 @@ export default {}
   position: absolute;
   top: 0; left: 24px; right: 24px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.6), transparent);
+  background: linear-gradient(90deg, transparent, rgba(95, 200, 212, 0.7), transparent);
 }
 .hero-tokens-head { display: flex; align-items: center; gap: 12px; }
 .hero-tokens-icon {
   width: 36px; height: 36px; border-radius: 9px;
-  background: linear-gradient(135deg, rgba(167, 139, 250, 0.3), rgba(95, 110, 200, 0.3));
-  color: var(--nebula-bright);
-  border: 1px solid rgba(167, 139, 250, 0.3);
+  background: linear-gradient(135deg, rgba(95, 200, 212, 0.22), rgba(125, 146, 232, 0.18));
+  color: var(--aurora-bright);
+  border: 1px solid rgba(95, 200, 212, 0.32);
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 0 16px rgba(167, 139, 250, 0.25);
+  box-shadow: 0 0 18px rgba(95, 200, 212, 0.28);
 }
 .hero-tokens-label {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-faint);
-  font-family: var(--font-display);
-  letter-spacing: 0.12em;
+  font-family: var(--font-sans);
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  font-weight: 500;
+  font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.hero-tokens-label::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--aurora);
+  box-shadow: 0 0 8px var(--aurora);
 }
 .hero-tokens-sub {
   font-size: 11px;
@@ -429,17 +437,18 @@ export default {}
   margin-top: 2px;
 }
 .hero-tokens-value {
-  margin-top: 10px;
+  margin-top: 14px;
   display: flex; align-items: baseline; gap: 8px;
 }
 .hero-tokens-value .num {
-  font-size: 38px;
-  font-weight: 600;
+  font-size: 44px;
+  font-weight: 400;
   color: var(--text);
-  font-family: var(--font-display);
-  letter-spacing: -0.03em;
+  font-family: var(--font-serif);
+  letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  font-feature-settings: 'ss01', 'tnum';
 }
 .hero-tokens-value .unit {
   font-size: 12px;

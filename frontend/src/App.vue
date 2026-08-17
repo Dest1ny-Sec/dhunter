@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import Icon from './components/icons/Icon.vue'
+import BrandMark from './components/icons/BrandMark.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,10 +74,8 @@ function logout() {
   <div v-else class="app-shell">
     <aside class="app-sidebar">
       <div class="brand">
-        <div class="brand-mark">
-          <img src="/logo-512.png" alt="Dhunter" style="width: 100%; height: 100%; object-fit: cover; border-radius: 9px" />
-        </div>
-        <span>Dhunter</span>
+        <BrandMark :size="32" :glow="true" :animate="true" />
+        <span class="brand-text">Dhunter</span>
       </div>
 
       <div
@@ -131,6 +130,13 @@ function logout() {
 </template>
 
 <style scoped>
+.brand-text {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  font-feature-settings: 'ss01';
+}
 .skip-link {
   position: fixed;
   top: -100px;

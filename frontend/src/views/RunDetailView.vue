@@ -316,7 +316,7 @@ watch(runId, async (v) => {
     </button>
     <div class="run-head">
       <div class="row">
-        <h2 style="font-size: 16px; font-weight: 600; margin: 0">Run <code>{{ runId.slice(0, 8) }}</code></h2>
+        <h2 class="page-title" style="font-size: 18px; margin: 0">Run <code>{{ runId.slice(0, 8) }}</code></h2>
         <UiBadge kind="status" :value="status" :dot="true" />
         <button v-if="['running', 'pending'].includes(status)" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="pauseRun">⏸ 暂停</button>
         <button v-if="['success','completed','failed','cancelled','paused'].includes(status)" style="min-height: 28px; padding: 0 10px; font-size: 12px" @click="continueRun">{{ status === 'paused' ? '▶ 继续' : '继续深入' }}</button>

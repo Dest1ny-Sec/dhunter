@@ -130,7 +130,7 @@ onMounted(load)
     <div class="proj-head">
       <div>
         <div class="muted" style="font-size: 12px">项目会话</div>
-        <h2 style="font-size: 20px; font-weight: 600; margin: 2px 0 0">{{ target?.value || target?.normalized || targetId }}</h2>
+        <h2 class="page-title" style="font-size: 22px; margin: 2px 0 0">{{ target?.value || target?.normalized || targetId }}</h2>
         <div class="muted" style="font-size: 13px; margin-top: 2px">
           <span class="pill" style="margin-right: 6px">{{ target?.type || 'auto' }}</span>
           <span v-if="hasAuth()" class="pill confirmed">🔐 已配置会话</span>

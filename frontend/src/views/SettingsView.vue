@@ -114,8 +114,9 @@ onMounted(load)
 
 <template>
   <div class="col">
-    <h2 style="font-size: 20px; font-weight: 600; margin: 0">设置</h2>
+    <h2 class="page-title">设置</h2>
 
+    <div class="section-title">配置</div>
     <div class="settings-grid">
       <UiCard title="AI 大模型（导入你自己的模型，测试连接）">
         <div class="form-grid">
@@ -177,7 +178,10 @@ onMounted(load)
           重启后密码即重置为该值，登录成功后请移除该开关。
         </div>
       </UiCard>
+    </div>
 
+    <div class="section-title">资源与预算</div>
+    <div class="settings-grid">
       <UiCard title="清空数据（危险操作）">
         <div class="muted" style="font-size: 12px; margin-bottom: 10px">
           清空全部测试数据：目标、运行记录、对话消息、漏洞成果、先验知识。账号与 LLM 配置保留。
@@ -203,6 +207,7 @@ onMounted(load)
       </UiCard>
     </div>
 
+    <div class="section-title">平台服务</div>
     <UiCard title="平台服务（自动检测）">
       <div class="svc-row">
         <div class="svc-info">
