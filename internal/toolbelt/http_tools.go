@@ -3,6 +3,7 @@ package toolbelt
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,6 +19,18 @@ func httpRequest(ctx context.Context, args map[string]interface{}) toolResult {
 	target := argString(args, "url", "")
 	if target == "" {
 		return errResult("http_request: `url` is required")
+	}
+
+	// Connection-layer cooldown: a host that already failed DNS/connect
+	// gets an instant "unreachable" answer instead of another 15s timeout.
+	parsed, _ := url.Parse(target)
+	if parsed != nil && parsed.Hostname() != "" {
+		if why, bad := hostUnreachable(parsed.Hostname()); bad {
+			return errResult(fmt.Sprintf(
+				"http_request: %s 已被标记不可达（%s），%s 内跳过该主机；先测其他目标，稍后重试",
+				parsed.Hostname(), clipStr(why, 100), UNREACHABLE_COOLDOWN.Round(time.Minute),
+			))
+		}
 	}
 
 	var body io.Reader
@@ -46,6 +59,11 @@ func httpRequest(ctx context.Context, args map[string]interface{}) toolResult {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		// DNS / connect refused / timeout → put the host on cooldown so the
+		// agent doesn't re-probe it for a while.
+		if parsed != nil && parsed.Hostname() != "" && isConnectionError(err) {
+			noteUnreachableHost(parsed.Hostname(), err.Error())
+		}
 		return errResult("http_request: " + err.Error())
 	}
 	defer resp.Body.Close()

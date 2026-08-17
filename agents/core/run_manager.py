@@ -30,7 +30,11 @@ from tools.registry import ToolRegistry
 
 log = logging.getLogger(__name__)
 
-MAX_WORKERS = int(os.environ.get("DHUNTER_MAX_WORKERS", "3"))
+# Default concurrency. 2 workers instead of 3: each worker runs its own
+# full tool-loop context, so 3 means ~3x the context spend in flight.
+# 2 keeps parallel exploration while cutting token burn by a third
+# (speed is slightly lower — acceptable trade, quality unchanged).
+MAX_WORKERS = int(os.environ.get("DHUNTER_MAX_WORKERS", "2"))
 MAX_REASON_ROUNDS = int(os.environ.get("DHUNTER_MAX_REASON_ROUNDS", "8"))
 WORKER_SLICE_SECONDS = 2.0
 # A reason "noop" is only trustworthy after real exploration happened. If the

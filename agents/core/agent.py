@@ -36,9 +36,9 @@ STEP_TIMEOUT = float(os.environ.get("DHUNTER_AGENT_STEP_TIMEOUT", "120"))       
 MAX_ITERATIONS = int(os.environ.get("DHUNTER_AGENT_MAX_ITERATIONS", "40"))         # tool-loop cap per worker
 # Tool outputs are fed back to the LLM on the next turn and re-sent on every
 # subsequent turn, so a large cap directly inflates the context for the rest
-# of the loop. 8k keeps payloads meaningful without bloating the window;
+# of the loop. 4k keeps payloads meaningful without bloating the window;
 # agents that need more re-issue a targeted request.
-MAX_TOOL_RESULT_CHARS = 8_000  # truncate huge tool outputs before the next LLM turn
+MAX_TOOL_RESULT_CHARS = 4_000  # truncate huge tool outputs before the next LLM turn
 
 # --- context compaction (sliding window) -----------------------------------
 #
@@ -56,8 +56,8 @@ MAX_TOOL_RESULT_CHARS = 8_000  # truncate huge tool outputs before the next LLM 
 # fails signature validation), so thinking cannot be trimmed in place. The
 # sliding window achieves the same goal safely: whole old turns — including
 # their thinking blocks — are dropped together.
-MAX_CONTEXT_ROUNDS = int(os.environ.get("DHUNTER_MAX_CONTEXT_ROUNDS", "20"))
-_COMPACT_KEEP_ROUNDS = 12
+MAX_CONTEXT_ROUNDS = int(os.environ.get("DHUNTER_MAX_CONTEXT_ROUNDS", "12"))
+_COMPACT_KEEP_ROUNDS = 8
 
 
 def _now_iso() -> str:
