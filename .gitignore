@@ -1,6 +1,8 @@
 # Binaries / build output
 /bin/
-dist/
+# dist/ is too broad — it ignores frontend/dist which IS committed.
+# (Go server falls back to "API only" without it.)
+# dist/
 
 # Runtime data (SQLite DB, WAL, SHM)
 data/*.db
@@ -14,7 +16,10 @@ data/*.db-shm
 
 # Frontend
 frontend/node_modules/
-frontend/dist/
+# frontend/dist/ is COMMITTED to the repo so users can install without Node.js.
+# (Go server falls back to "API only" without it.) Run `cd frontend && npm run
+# build` to refresh after editing frontend sources.
+# frontend/dist/
 
 # Python
 agents/.venv/

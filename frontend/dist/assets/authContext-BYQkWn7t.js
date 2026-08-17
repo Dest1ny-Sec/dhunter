@@ -1,0 +1,1 @@
+function r(t){if(!t)return null;if(typeof t=="string")try{const e=JSON.parse(t);return e&&typeof e=="object"?e:null}catch{return null}return typeof t=="object"?t:null}function n(t){return!!(t&&(t.cookies||t.username&&t.password))}function u(t){const e=r(t);return e?e.cookies?!0:n(e.account_a)||n(e.account_b):!1}export{u as h};

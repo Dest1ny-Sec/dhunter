@@ -53,8 +53,30 @@ build_if_needed() {
   fi
 }
 
+# Build frontend dist if missing. The repo normally ships a pre-built dist so
+# this is a safety net for the case where the user wiped it or pulled an
+# older commit. Without dist the Go server logs "no web UI found — only API
+# is served" and the page is blank.
+build_frontend_if_needed() {
+  if [ -f "$ROOT/frontend/dist/index.html" ]; then
+    return 0
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    errln "frontend/dist 缺失但未检测到 npm — 无法自动构建, 启动后只能访问 API"
+    errln "在有 Node.js 的机器上跑: cd frontend && npm install && npm run build"
+    return 1
+  fi
+  echo "→ 构建前端 (frontend/dist 缺失)..."
+  if [ ! -d "$ROOT/frontend/node_modules" ]; then
+    (cd "$ROOT/frontend" && npm install --no-audit --no-fund) || return 1
+  fi
+  (cd "$ROOT/frontend" && npm run build) || return 1
+  okln "前端构建完成"
+}
+
 start_all() {
   build_if_needed
+  build_frontend_if_needed
   echo "=== 启动顺序: MCP (9124) → Python agent (9100) → Dhunter server ($PLAT_PORT) ==="
 
   # 1. MCP

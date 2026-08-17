@@ -67,7 +67,7 @@
 |---|---|---|
 | **Go** | 1.22+ | server + MCP 工具集（纯 Go 无 CGO，单静态二进制） |
 | **Python** | 3.10+ | agent（黑板调度器） |
-| **Node.js** | 18+ | 构建前端（仅源码部署时需要；仓库已带预构建 dist 可跳过） |
+| **Node.js** | 18+ | **可选** — 仓库已带预构建 dist，无 Node 也能直接启动；改前端源码后需要重 build |
 | 外部扫描器 | 可选 | 见 [外部工具依赖](#-外部工具依赖可选)，缺失自动跳过 |
 
 ### 一键启动（推荐）
@@ -112,7 +112,7 @@ powershell -ExecutionPolicy Bypass -File scripts\start-dhunter.ps1 start   # Win
 # 0. （推荐）一次性生成并导出三进程一致的 token（agent 复用平台 token）
 source scripts/dev-env.sh
 
-# 1. 构建前端（仓库已带预构建 dist，改过前端才需要；跳过则直接跑 server）
+# 1. 构建前端（仓库已带预构建 dist，无需 Node 即可启动；改过前端源码才需要重 build）
 cd frontend && npm install && npm run build && cd ..
 
 # 2. 构建 Go 平台（server + MCP 工具）
