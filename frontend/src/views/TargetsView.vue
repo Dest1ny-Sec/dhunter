@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -26,6 +26,7 @@ const error = ref<string | null>(null)
 const delError = ref<string | null>(null)
 const listError = ref<string | null>(null)
 const exportMsg = ref<{ ok: boolean; text: string } | null>(null)
+const exportOpen = ref<string | null>(null)  // target id whose export menu is open
 const loading = ref(false)
 const authConfirmed = ref(false)
 const llmReady = ref(true)
@@ -217,6 +218,13 @@ function viewRuns(t: any) {
   router.push(`/targets/${t.id}/runs`)
 }
 
+function toggleExportMenu(id: string) {
+  exportOpen.value = exportOpen.value === id ? null : id
+}
+function closeExportMenu() {
+  exportOpen.value = null
+}
+
 /** Pin/unpin a target (backend sorts favorites first). */
 async function toggleFavorite(t: any) {
   try {
@@ -268,6 +276,12 @@ onMounted(() => {
   Promise.all([api.get('/settings/llm'), api.get('/status')]).then(([llm, st]) => {
     llmReady.value = !!(llm.data?.api_key || st.data?.llm?.key_set)
   }).catch(() => { llmReady.value = false })
+  // close the per-card export menu when clicking anywhere outside it
+  document.addEventListener('click', closeExportMenu)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeExportMenu)
 })
 </script>
 
@@ -417,8 +431,22 @@ onMounted(() => {
           <div class="eng-card-foot-actions">
             <button class="ghost" @click="newRun(t)">新建运行</button>
             <button @click="viewRuns(t)">历史</button>
-            <button @click="exportReport(t)">导出 Markdown</button>
-            <button @click="exportHTML(t)">导出 HTML</button>
+            <div class="export-menu-wrap">
+              <button class="ghost" @click.stop="toggleExportMenu(t.id)" :aria-expanded="exportOpen === t.id" aria-haspopup="true">
+                导出
+                <span class="caret" aria-hidden="true">▾</span>
+              </button>
+              <div v-if="exportOpen === t.id" class="export-menu" @click.stop>
+                <button class="menu-item" @click="exportReport(t); exportOpen = null">
+                  <Icon name="book" :size="13" />
+                  <span>Markdown 报告</span>
+                </button>
+                <button class="menu-item" @click="exportHTML(t); exportOpen = null">
+                  <Icon name="book" :size="13" />
+                  <span>HTML 报告</span>
+                </button>
+              </div>
+            </div>
             <button class="ghost danger-text" @click="removeTarget(t)" :aria-label="'删除项目 ' + (t.name || t.value)">删除</button>
           </div>
         </div>
@@ -443,7 +471,7 @@ onMounted(() => {
 .field-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
 .auth-details summary { cursor: pointer; font-size: 13px; color: var(--stellar-bright); }
 .auth-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
-.eng-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.eng-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
 .eng-card { display: flex; flex-direction: column; gap: 8px; transition: border-color 0.15s, transform 0.15s; }
 .eng-card:hover { border-color: var(--border-bright); transform: translateY(-2px); box-shadow: 0 6px 24px rgba(125, 146, 232, 0.12); }
 .eng-card-head { display: flex; align-items: center; gap: 8px; }
@@ -488,6 +516,41 @@ onMounted(() => {
   flex-shrink: 0;
 }
 .eng-card-foot-actions .danger-text { color: var(--danger); }
+
+/* export dropdown menu */
+.export-menu-wrap { position: relative; }
+.export-menu-wrap > button .caret {
+  font-size: 9px; margin-left: 2px; opacity: 0.7;
+}
+.export-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);  /* opens upward so it never gets clipped by the card border */
+  min-width: 168px;
+  background: var(--bg-elev-2, #1a2240);
+  border: 1px solid var(--border-bright, rgba(125, 146, 232, 0.32));
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.export-menu .menu-item {
+  display: flex; align-items: center; gap: 8px;
+  background: transparent; border: none;
+  color: var(--text, #e8ecf6);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  text-align: left;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: auto;
+}
+.export-menu .menu-item:hover {
+  background: rgba(125, 146, 232, 0.14);
+  color: var(--text);
+}
 .sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .auth-confirm {
   display: flex; align-items: center; gap: 8px;

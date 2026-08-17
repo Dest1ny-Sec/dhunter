@@ -299,7 +299,7 @@ code:not(pre code) {
   position: relative;
 }
 .muted { color: var(--text-dim); }
-.row { display: flex; gap: 12px; align-items: center; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .col { display: flex; flex-direction: column; gap: 12px; }
 .spacer { flex: 1; }
 

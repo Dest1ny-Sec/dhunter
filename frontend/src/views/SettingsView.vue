@@ -233,7 +233,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
 .svc-row {
