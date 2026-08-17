@@ -95,18 +95,32 @@ const reportHtml = computed(() => {
   }
 })
 
-const toolCalls = computed(() =>
-  events.value
-    .filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
-    .map((e, idx, arr) => {
-      if (e.type === 'tool_call') {
-        const result = arr.find((x, j) => j > idx && x.type === 'tool_result' && x.data?.call_id === e.data?.call_id)
-        return { call: e, result }
+// tool_calls paired with their results, maintained INCREMENTALLY as SSE
+// events arrive. The old computed re-scanned the whole events array (with an
+// O(n) find per tool_call) on EVERY event — quadratic as the stream grows,
+// which made the page grind on long runs.
+const toolCalls = ref<Array<{ call: SSEEvent; result?: SSEEvent }>>([])
+const MAX_TOOL_ROWS = 200
+
+function trackToolCall(ev: SSEEvent) {
+  if (ev.type === 'tool_call') {
+    toolCalls.value.push({ call: ev })
+    if (toolCalls.value.length > MAX_TOOL_ROWS) {
+      toolCalls.value.splice(0, toolCalls.value.length - MAX_TOOL_ROWS)
+    }
+  } else if (ev.type === 'tool_result') {
+    const cid = ev.data?.call_id
+    let pending: { call: SSEEvent; result?: SSEEvent } | undefined
+    if (cid) {
+      for (let i = toolCalls.value.length - 1; i >= 0; i--) {
+        const t = toolCalls.value[i]
+        if (!t.result && t.call.data?.call_id === cid) { pending = t; break }
       }
-      return null
-    })
-    .filter(Boolean) as Array<{ call: SSEEvent; result?: SSEEvent }>
-)
+    }
+    if (pending) pending.result = ev
+    else toolCalls.value.push({ call: ev as unknown as SSEEvent })
+  }
+}
 
 const totalTokens = computed(() =>
   (runInfo.value?.input_tokens || 0) + (runInfo.value?.output_tokens || 0) + (runInfo.value?.cache_read_input_tokens || 0)
@@ -219,9 +233,12 @@ function connectSSE() {
       // Long runs stream one event per delta chunk — cap the in-memory list
       // so the live-stream tab doesn't grind to a halt after thousands of
       // events. The DB keeps the full history (tool_calls / messages).
-      if (events.value.length > 1000) {
-        events.value.splice(0, events.value.length - 1000)
+      if (events.value.length > 500) {
+        events.value.splice(0, events.value.length - 500)
       }
+      // Incremental tool_call/tool_result pairing (O(1)/O(n) per event,
+      // not O(n²) across the whole stream).
+      trackToolCall(ev)
       if (ev.type === 'run_status' && ev.data?.status) status.value = ev.data.status
       if (ev.type === 'run_done') {
         const st = ev.data?.run_status || ev.data?.status
@@ -257,7 +274,11 @@ onMounted(async () => {
   await loadRun()
   connectSSE()
   loadTools()
-  toolTimer = window.setInterval(loadTools, 3000)
+  // Poll the tool-activity list less aggressively, and only while the
+  // 工具活动 tab is actually open — rebuilding that table every 3s from any
+  // tab was a big part of long-run page lag.
+  toolTimer = window.setInterval(() => { if (tab.value === 'tools') loadTools() }, 6000)
+  watch(tab, (t) => { if (t === 'tools') loadTools() })
   try {
     const [llmRes, budRes] = await Promise.all([
       api.get('/settings/llm'), api.get('/settings/budget'),
@@ -276,6 +297,7 @@ watch(runId, async (v) => {
     tab.value = 'results'
     expandedResults.value = {}
     events.value = []
+    toolCalls.value = []
     vulns.value = []
     report.value = ''
     toolActivity.value = []

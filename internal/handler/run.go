@@ -58,6 +58,11 @@ func (h *RunHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target_id is required"})
 		return
 	}
+	// Keep in sync with the Python sidecar's StartRunBody (max 4096).
+	if len(req.Objective) > 4096 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "objective too long (max 4096)"})
+		return
+	}
 	target, err := h.Stores.Targets.Get(c.Request.Context(), req.TargetID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

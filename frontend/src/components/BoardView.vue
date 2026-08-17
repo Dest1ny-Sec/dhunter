@@ -57,7 +57,7 @@ async function sendHint() {
 
 onMounted(() => {
   load()
-  timer = window.setInterval(load, 2500)
+  timer = window.setInterval(load, 4000)
 })
 onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer)
@@ -188,8 +188,17 @@ function syncGraph() {
     }
     flowNodes.value.push(...fresh)
   }
-  // edges carry no user position; replace wholesale
-  flowEdges.value = desiredEdges
+  // Edges: incremental diff instead of wholesale replacement. Replacing the
+  // whole edges array every poll made Vue Flow re-layout the entire graph
+  // (very janky with 50+ edges on long runs).
+  const want = new Map(desiredEdges.map((e) => [e.id, e]))
+  const next: VEdge[] = flowEdges.value
+    .filter((e) => want.has(e.id))
+    .map((e) => ({ ...e, ...want.get(e.id)! })) // refresh animated/style in place
+  for (const w of desiredEdges) {
+    if (!flowEdges.value.some((e) => e.id === w.id)) next.push(w)
+  }
+  flowEdges.value = next
 }
 
 function onNodeClick({ node }: any) {

@@ -77,6 +77,12 @@ func (h *VulnsHandler) Create(c *gin.Context) {
 	if body.Severity == "" {
 		body.Severity = "medium"
 	}
+	// Same enum validation as PATCH — otherwise a bad severity (e.g. from a
+	// hallucinated LLM payload) lands in the DB and skews dedup/verifier.
+	if _, ok := validVulnSeverities[body.Severity]; !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "severity must be one of critical|high|medium|low|info"})
+		return
+	}
 	if body.Status == "" {
 		body.Status = "pending" // new findings wait for the verifier
 	}
