@@ -6,6 +6,7 @@ Dhunter 的版本变更记录。**详细 release notes 在 [GitHub Releases](htt
 
 | 版本 | 日期 | 类型 | 一句话 |
 |---|---|---|---|
+| [v0.7.1](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.7.1) | 2026-08-18 | feat | 库 / MCP 扩展加固 / Skills / 模板 / EXTERNAL 工具标签 |
 | [v0.7.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.7.0) | 2026-08-18 | feat | MCP 扩展中心：用户可挂载外部 MCP server，工具以 `<server>::<tool>` 命名空间聚合 |
 | [v0.6.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.6.0) | 2026-08-18 | feat | PoC 硬证据入报告 + ReAct 反思进 worker tool loop |
 | [v0.5.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.5.0) | 2026-08-18 | feat | 安全加固 + 可观测性 + watchdog + ADR |
