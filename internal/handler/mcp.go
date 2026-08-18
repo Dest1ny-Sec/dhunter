@@ -127,26 +127,32 @@ func NewMCPHandler(s *store.Stores, agent AgentClient) *MCPHandler {
 // it to namespace external tool names (<name>::<tool>) so they don't
 // collide with the built-in toolbelt.
 var safeNameRE = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,64}$`)
+var headerNameRE = regexp.MustCompile("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+var authSchemeRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._~\-]{0,63}$`)
 
 // createMCPReq is the JSON body for POST /api/mcp-servers.
 type createMCPReq struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Transport   string `json:"transport"`
-	Token       string `json:"token"`
-	Enabled     *bool  `json:"enabled"`
-	Description string `json:"description"`
+	Name        string  `json:"name"`
+	URL         string  `json:"url"`
+	Transport   string  `json:"transport"`
+	Token       string  `json:"token"`
+	AuthHeader  *string `json:"auth_header"`
+	AuthScheme  *string `json:"auth_scheme"`
+	Enabled     *bool   `json:"enabled"`
+	Description string  `json:"description"`
 }
 
 // updateMCPReq is the JSON body for PUT /api/mcp-servers/:id.
 type updateMCPReq struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Transport   string `json:"transport"`
-	Token       string `json:"token"`       // empty = keep; non-empty = replace
-	ClearToken  bool   `json:"clear_token"` // explicit wipe (frontend sends this)
-	Enabled     *bool  `json:"enabled"`
-	Description string `json:"description"`
+	Name        string  `json:"name"`
+	URL         string  `json:"url"`
+	Transport   string  `json:"transport"`
+	Token       string  `json:"token"`       // empty = keep; non-empty = replace
+	ClearToken  bool    `json:"clear_token"` // explicit wipe (frontend sends this)
+	AuthHeader  *string `json:"auth_header"` // nil = keep
+	AuthScheme  *string `json:"auth_scheme"` // nil = keep; explicit "" = raw token
+	Enabled     *bool   `json:"enabled"`
+	Description string  `json:"description"`
 }
 
 // List handles GET /api/mcp-servers — token is redacted; HasToken
@@ -206,6 +212,18 @@ func (h *MCPHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "transport must be \"http\" in v0.7.0"})
 		return
 	}
+	authHeader, authScheme := "Authorization", "Bearer"
+	if body.AuthHeader != nil {
+		authHeader = *body.AuthHeader
+	}
+	if body.AuthScheme != nil {
+		authScheme = *body.AuthScheme
+	}
+	authHeader, authScheme, err := normalizeMCPAuth(authHeader, authScheme)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	enabled := true
 	if body.Enabled != nil {
 		enabled = *body.Enabled
@@ -215,6 +233,8 @@ func (h *MCPHandler) Create(c *gin.Context) {
 		URL:         body.URL,
 		Transport:   body.Transport,
 		Token:       body.Token,
+		AuthHeader:  authHeader,
+		AuthScheme:  authScheme,
 		Enabled:     enabled,
 		Description: strings.TrimSpace(body.Description),
 		CreatedAt:   time.Now().UTC(),
@@ -279,6 +299,18 @@ func (h *MCPHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "transport must be \"http\" in v0.7.0"})
 		return
 	}
+	authHeader, authScheme := existing.AuthHeader, existing.AuthScheme
+	if body.AuthHeader != nil {
+		authHeader = *body.AuthHeader
+	}
+	if body.AuthScheme != nil {
+		authScheme = *body.AuthScheme
+	}
+	authHeader, authScheme, err = normalizeMCPAuth(authHeader, authScheme)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	enabled := existing.Enabled
 	if body.Enabled != nil {
 		enabled = *body.Enabled
@@ -287,6 +319,8 @@ func (h *MCPHandler) Update(c *gin.Context) {
 	updated.Name = body.Name
 	updated.URL = body.URL
 	updated.Transport = body.Transport
+	updated.AuthHeader = authHeader
+	updated.AuthScheme = authScheme
 	updated.Enabled = enabled
 	updated.Description = strings.TrimSpace(body.Description)
 	if err := h.Stores.MCPServers.Update(c.Request.Context(), &updated); err != nil {
@@ -342,7 +376,7 @@ func (h *MCPHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	tools, latencyMs, err := probeMCP(c.Request.Context(), m.URL, m.Token, 8*time.Second)
+	tools, latencyMs, err := probeMCP(c.Request.Context(), m.URL, m.Token, m.AuthHeader, m.AuthScheme, 8*time.Second)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"ok":         false,
@@ -426,6 +460,8 @@ func (h *MCPHandler) Active(c *gin.Context) {
 			"url":         m.URL,
 			"transport":   m.Transport,
 			"token":       m.Token,
+			"auth_header": m.AuthHeader,
+			"auth_scheme": m.AuthScheme,
 			"description": m.Description,
 		})
 	}
@@ -436,10 +472,14 @@ func (h *MCPHandler) Active(c *gin.Context) {
 // against an MCP streamable-HTTP endpoint and returns the declared tools.
 // It is shared by Test (UI smoke test) and could be reused by the agent
 // bootstrap path if we ever probe instead of trusting config.
-func probeMCP(ctx context.Context, url, token string, timeout time.Duration) ([]map[string]any, int64, error) {
+func probeMCP(ctx context.Context, url, token, authHeader, authScheme string, timeout time.Duration) ([]map[string]any, int64, error) {
 	start := time.Now()
 	if !isHTTPUrl(url) {
 		return nil, time.Since(start).Milliseconds(), fmt.Errorf("invalid url")
+	}
+	probe := &mcpProbeClient{
+		url: url, token: token, authHeader: authHeader, authScheme: authScheme,
+		client: &http.Client{Timeout: timeout},
 	}
 	// 1. initialize — protocolVersion is the same constant we ship in the
 	//    Python agent so a compatible server replies with a matching cap.
@@ -453,12 +493,12 @@ func probeMCP(ctx context.Context, url, token string, timeout time.Duration) ([]
 			"clientInfo":      map[string]any{"name": "dhunter-test", "version": "0.7.0"},
 		},
 	}
-	if _, err := rpcOnce(ctx, url, token, initReq, timeout); err != nil {
+	if _, err := probe.rpcOnce(ctx, initReq); err != nil {
 		return nil, time.Since(start).Milliseconds(), fmt.Errorf("initialize: %w", err)
 	}
 	// 2. tools/list
 	listReq := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": map[string]any{}}
-	res, err := rpcOnce(ctx, url, token, listReq, timeout)
+	res, err := probe.rpcOnce(ctx, listReq)
 	if err != nil {
 		return nil, time.Since(start).Milliseconds(), fmt.Errorf("tools/list: %w", err)
 	}
@@ -474,28 +514,49 @@ func probeMCP(ctx context.Context, url, token string, timeout time.Duration) ([]
 	return tools, time.Since(start).Milliseconds(), nil
 }
 
+// mcpProbeClient keeps the Streamable HTTP session ID returned by
+// initialize and sends it on subsequent calls. Hosted MCP services commonly
+// require this even though simple stateless test servers do not.
+type mcpProbeClient struct {
+	url        string
+	token      string
+	authHeader string
+	authScheme string
+	sessionID  string
+	client     *http.Client
+}
+
 // rpcOnce fires one JSON-RPC POST and unwraps the response. Mirrors the
 // Python MCPClient (POST one request, support JSON or SSE reply).
-func rpcOnce(ctx context.Context, url, token string, payload map[string]any, timeout time.Duration) (map[string]any, error) {
+func (p *mcpProbeClient) rpcOnce(ctx context.Context, payload map[string]any) (map[string]any, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if p.token != "" {
+		value := p.token
+		if p.authScheme != "" {
+			value = p.authScheme + " " + value
+		}
+		req.Header.Set(p.authHeader, value)
 	}
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	if p.sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", p.sessionID)
+	}
+	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if sid := strings.TrimSpace(resp.Header.Get("Mcp-Session-Id")); sid != "" {
+		p.sessionID = sid
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err
@@ -565,6 +626,28 @@ func truncateForErr(s string, n int) string {
 
 func isHTTPUrl(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+// normalizeMCPAuth validates the one configurable credential header used for
+// an external MCP. Empty authScheme means the token is sent raw; otherwise
+// the wire value is `<scheme> <token>` (the default remains Bearer).
+func normalizeMCPAuth(authHeader, authScheme string) (string, string, error) {
+	authHeader = strings.TrimSpace(authHeader)
+	authScheme = strings.TrimSpace(authScheme)
+	if authHeader == "" {
+		return "", "", fmt.Errorf("auth_header is required")
+	}
+	if !headerNameRE.MatchString(authHeader) {
+		return "", "", fmt.Errorf("auth_header is not a valid HTTP header name")
+	}
+	switch strings.ToLower(authHeader) {
+	case "accept", "content-length", "content-type", "host", "mcp-session-id":
+		return "", "", fmt.Errorf("auth_header %q is reserved", authHeader)
+	}
+	if authScheme != "" && !authSchemeRE.MatchString(authScheme) {
+		return "", "", fmt.Errorf("auth_scheme must be empty or a single HTTP auth scheme token")
+	}
+	return authHeader, authScheme, nil
 }
 
 // classifyURLPrivate flags addresses the UI should hint about: loopback,

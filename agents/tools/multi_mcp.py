@@ -138,7 +138,13 @@ class ExternalMCPHub:
             if not _SAFE_NAME.match(name) or not murl:
                 log.warning("ExternalMCPHub: skipping bad row: %r", s)
                 continue
-            clean.append({"name": name, "url": murl, "token": s.get("token") or ""})
+            clean.append({
+                "name": name,
+                "url": murl,
+                "token": s.get("token") or "",
+                "auth_header": s.get("auth_header") or "Authorization",
+                "auth_scheme": s.get("auth_scheme", "Bearer"),
+            })
         if not clean:
             self._last_reload_error = "no valid rows after filter"
             return {}
@@ -149,7 +155,12 @@ class ExternalMCPHub:
 
         async def connect_one(s: dict[str, Any]) -> tuple[str, dict[str, Any], MCPClient | None]:
             async with sem:
-                client = MCPClient(url=s["url"], token=s["token"])
+                client = MCPClient(
+                    url=s["url"],
+                    token=s["token"],
+                    auth_header=s["auth_header"],
+                    auth_scheme=s["auth_scheme"],
+                )
                 try:
                     await asyncio.wait_for(client.initialize(), timeout=10.0)
                     tools = await asyncio.wait_for(client.list_tools(), timeout=10.0)

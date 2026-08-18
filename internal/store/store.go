@@ -1290,6 +1290,8 @@ type MCPServer struct {
 	Transport   string    `json:"transport"` // "http" (v0.7.0 only)
 	Token       string    `json:"-"`        // see MarshalJSON
 	HasToken    bool      `json:"has_token"` // convenience: present in list/get
+	AuthHeader  string    `json:"auth_header"`
+	AuthScheme  string    `json:"auth_scheme"`
 	Enabled     bool      `json:"enabled"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -1320,6 +1322,8 @@ func (m MCPServer) MarshalJSON() ([]byte, error) {
 		Transport   string    `json:"transport"`
 		Token       string    `json:"token,omitempty"`
 		HasToken    bool      `json:"has_token"`
+		AuthHeader  string    `json:"auth_header"`
+		AuthScheme  string    `json:"auth_scheme"`
 		Enabled     bool      `json:"enabled"`
 		Description string    `json:"description,omitempty"`
 		Private     bool      `json:"private,omitempty"`
@@ -1329,7 +1333,8 @@ func (m MCPServer) MarshalJSON() ([]byte, error) {
 	}
 	out := alias{
 		ID: m.ID, Name: m.Name, URL: m.URL, Transport: m.Transport,
-		Token: m.Token, HasToken: m.HasToken, Enabled: m.Enabled,
+		Token: m.Token, HasToken: m.HasToken, AuthHeader: m.AuthHeader,
+		AuthScheme: m.AuthScheme, Enabled: m.Enabled,
 		Description: m.Description, Private: m.Private, PrivateNote: m.PrivateNote,
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
@@ -1364,10 +1369,17 @@ func (s *MCPServerStore) Create(ctx context.Context, m *MCPServer) error {
 	if m.Transport == "" {
 		m.Transport = "http"
 	}
+	if m.AuthHeader == "" {
+		m.AuthHeader = "Authorization"
+		if m.AuthScheme == "" {
+			m.AuthScheme = "Bearer"
+		}
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO mcp_servers (id, name, url, transport, token, enabled, description, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.Name, m.URL, m.Transport, m.Token, boolInt(m.Enabled), m.Description, m.CreatedAt.UnixMilli(), m.UpdatedAt.UnixMilli())
+		`INSERT INTO mcp_servers (id, name, url, transport, token, auth_header, auth_scheme, enabled, description, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.Name, m.URL, m.Transport, m.Token, m.AuthHeader, m.AuthScheme,
+		boolInt(m.Enabled), m.Description, m.CreatedAt.UnixMilli(), m.UpdatedAt.UnixMilli())
 	return err
 }
 
@@ -1385,11 +1397,14 @@ func (s *MCPServerStore) Update(ctx context.Context, m *MCPServer) error {
 			name        = ?,
 			url         = ?,
 			transport   = ?,
+			auth_header = ?,
+			auth_scheme = ?,
 			enabled     = ?,
 			description = ?,
 			updated_at  = ?
 		 WHERE id = ?`,
-		m.Name, m.URL, m.Transport, boolInt(m.Enabled), m.Description, m.UpdatedAt.UnixMilli(), m.ID)
+		m.Name, m.URL, m.Transport, m.AuthHeader, m.AuthScheme,
+		boolInt(m.Enabled), m.Description, m.UpdatedAt.UnixMilli(), m.ID)
 	if err != nil {
 		return err
 	}
@@ -1428,7 +1443,7 @@ func (s *MCPServerStore) Delete(ctx context.Context, id string) error {
 // based on whether a non-empty token is stored.
 func (s *MCPServerStore) Get(ctx context.Context, id string) (*MCPServer, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, url, transport, token, enabled, description, created_at, updated_at
+		`SELECT id, name, url, transport, token, auth_header, auth_scheme, enabled, description, created_at, updated_at
 		 FROM mcp_servers WHERE id = ?`, id)
 	return scanMCPServer(row)
 }
@@ -1439,7 +1454,7 @@ func (s *MCPServerStore) List(ctx context.Context, limit int) ([]*MCPServer, err
 		limit = 200
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, url, transport, token, enabled, description, created_at, updated_at
+		`SELECT id, name, url, transport, token, auth_header, auth_scheme, enabled, description, created_at, updated_at
 		 FROM mcp_servers ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -1462,7 +1477,7 @@ func (s *MCPServerStore) List(ctx context.Context, limit int) ([]*MCPServer, err
 // separate handshake.
 func (s *MCPServerStore) ListEnabled(ctx context.Context) ([]*MCPServer, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, url, transport, token, enabled, description, created_at, updated_at
+		`SELECT id, name, url, transport, token, auth_header, auth_scheme, enabled, description, created_at, updated_at
 		 FROM mcp_servers WHERE enabled = 1 ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -1488,7 +1503,7 @@ func scanMCPServer(r rowScanner) (*MCPServer, error) {
 	var m MCPServer
 	var cMs, uMs int64
 	var token string
-	if err := r.Scan(&m.ID, &m.Name, &m.URL, &m.Transport, &token, &m.Enabled, &m.Description, &cMs, &uMs); err != nil {
+	if err := r.Scan(&m.ID, &m.Name, &m.URL, &m.Transport, &token, &m.AuthHeader, &m.AuthScheme, &m.Enabled, &m.Description, &cMs, &uMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

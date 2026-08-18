@@ -78,6 +78,8 @@ interface MCPServer {
   url: string
   transport: string
   has_token: boolean
+  auth_header: string
+  auth_scheme: string
   enabled: boolean
   description?: string
   private?: boolean
@@ -112,6 +114,8 @@ const form = reactive({
   name: '',
   url: '',
   token: '',
+  authHeader: 'Authorization',
+  authScheme: 'Bearer',
   enabled: true,
   description: '',
   // When editing, separate from `token` so the placeholder can read
@@ -127,6 +131,8 @@ function openAdd() {
   form.name = ''
   form.url = ''
   form.token = ''
+  form.authHeader = 'Authorization'
+  form.authScheme = 'Bearer'
   form.enabled = true
   form.description = ''
   form.clearToken = false
@@ -139,6 +145,8 @@ function openEdit(s: MCPServer) {
   form.name = s.name
   form.url = s.url
   form.token = '' // never re-populate (could be a stale UI value)
+  form.authHeader = s.auth_header || 'Authorization'
+  form.authScheme = s.auth_scheme ?? 'Bearer'
   form.enabled = s.enabled
   form.description = s.description || ''
   form.clearToken = false
@@ -164,6 +172,8 @@ async function saveForm() {
         name: form.name.trim(),
         url: form.url.trim(),
         transport: 'http',
+        auth_header: form.authHeader.trim(),
+        auth_scheme: form.authScheme.trim(),
         enabled: form.enabled,
         description: form.description.trim(),
       }
@@ -178,6 +188,8 @@ async function saveForm() {
         url: form.url.trim(),
         transport: 'http',
         token: form.token,
+        auth_header: form.authHeader.trim(),
+        auth_scheme: form.authScheme.trim(),
         enabled: form.enabled,
         description: form.description.trim(),
       })
@@ -444,13 +456,25 @@ const agentDotClass = computed(() => {
           <input v-model="form.url" placeholder="http://127.0.0.1:9000/mcp" />
         </div>
         <div>
-          <label class="field-label">Bearer Token</label>
+          <label class="field-label">访问 Token</label>
           <input v-model="form.token" type="password" :placeholder="editing?.has_token ? '已设置；留空保留' : '可选'" autocomplete="off" />
           <div v-if="editing?.has_token" class="row hint">
             <label class="inline-check">
               <input type="checkbox" v-model="form.clearToken" />
               <span>清空已存储的 Token</span>
             </label>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div>
+            <label class="field-label">鉴权 Header</label>
+            <input v-model="form.authHeader" placeholder="Authorization" autocomplete="off" />
+            <div class="hint">例如 <code>Authorization</code> 或 <code>X-QuakeToken</code></div>
+          </div>
+          <div>
+            <label class="field-label">鉴权 Scheme</label>
+            <input v-model="form.authScheme" placeholder="Bearer（留空则直接发送 Token）" autocomplete="off" />
+            <div class="hint">Quake 等原始 Token Header 请留空</div>
           </div>
         </div>
         <div>

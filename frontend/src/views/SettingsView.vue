@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import UiCard from '../components/ui/UiCard.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
@@ -8,6 +8,33 @@ import { useAuthStore } from '../stores/auth'
 
 const status = ref<any>(null)
 const auth = useAuthStore()
+
+interface ExternalMCPServerStatus {
+  name: string
+  status: 'connected' | 'error' | 'unknown'
+  tool_count: number
+  tools: string[]
+  error: string
+}
+
+interface ExternalMCPSyncStatus {
+  last_reload_at: number
+  last_reload_error: string
+  servers: ExternalMCPServerStatus[]
+}
+
+const externalMCP = ref<ExternalMCPSyncStatus | null>(null)
+const externalMCPError = ref('')
+const externalServers = computed(() => externalMCP.value?.servers || [])
+const externalConnected = computed(() => externalServers.value.filter((s) => s.status === 'connected').length)
+const externalTools = computed(() => externalServers.value.flatMap((s) =>
+  (s.tools || []).map((tool) => ({ server: s.name, tool, name: `${s.name}::${tool}` })),
+))
+const externalBadge = computed(() => {
+  if (externalMCPError.value) return 'failed'
+  if (!externalServers.value.length) return 'pending'
+  return externalConnected.value === externalServers.value.length ? 'connected' : 'failed'
+})
 
 // ---- AI API config (ccswitch-style import + test) ----
 const llm = ref({ provider: 'anthropic', base_url: '', model: '', api_key: '', max_tokens: 8192 })
@@ -50,10 +77,18 @@ async function clearData() {
 
 async function load() {
   try {
-    const [st, llmRes, bud] = await Promise.all([
-      api.get('/status'), api.get('/settings/llm'), api.get('/settings/budget'),
+    const externalReq = api.get('/mcp-servers/agent-status')
+      .then((r) => r.data)
+      .catch((e: any) => {
+        externalMCPError.value = e?.response?.data?.error || e?.message || 'Agent 状态不可用'
+        return null
+      })
+    const [st, llmRes, bud, ext] = await Promise.all([
+      api.get('/status'), api.get('/settings/llm'), api.get('/settings/budget'), externalReq,
     ])
     status.value = st.data
+    externalMCP.value = ext
+    if (ext) externalMCPError.value = ''
     if (llmRes.data?.model) llm.value = { ...llm.value, ...llmRes.data, api_key: llmRes.data.api_key || '' }
     budget.value = bud.data?.max_run_tokens || 0
     account.value.username = auth.username || account.value.username || 'admin'
@@ -227,6 +262,25 @@ onMounted(load)
       </div>
       <div class="svc-row">
         <div class="svc-info">
+          <div class="svc-name">外部 MCP 扩展</div>
+          <div v-if="externalMCPError" class="muted" style="font-size: 12px">{{ externalMCPError }}</div>
+          <div v-else-if="externalServers.length" class="muted" style="font-size: 12px">
+            {{ externalTools.length }} 个外部工具，{{ externalConnected }}/{{ externalServers.length }} 个服务已连接
+          </div>
+          <div v-else class="muted" style="font-size: 12px">尚未配置；请前往「库 → MCP 扩展」添加</div>
+        </div>
+        <UiBadge kind="status" :value="externalBadge" :dot="true" />
+      </div>
+      <div v-if="externalTools.length" class="tool-chips">
+        <span
+          v-for="item in externalTools"
+          :key="item.name"
+          class="tool-chip external"
+          :title="`${item.server} 提供的外部工具`"
+        >{{ item.name }}</span>
+      </div>
+      <div class="svc-row">
+        <div class="svc-info">
           <div class="svc-name">Agent 引擎 <span class="muted" style="font-size: 11px">({{ status?.agent?.url || '—' }})</span></div>
           <div class="muted" style="font-size: 12px">黑板调度器 + 多 worker，随平台启动</div>
         </div>
@@ -261,5 +315,6 @@ onMounted(load)
 }
 .tool-chip.avail { color: var(--ok); border-color: rgba(16,185,129,0.3); }
 .tool-chip.missing { color: var(--text-faint); text-decoration: line-through; }
+.tool-chip.external { color: var(--aurora-bright); border-color: rgba(95, 200, 212, 0.3); }
 @media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr; } }
 </style>

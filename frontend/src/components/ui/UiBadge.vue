@@ -10,6 +10,7 @@ const KNOWN = new Set([
   'critical', 'high', 'medium', 'low', 'info',
   'running', 'queued', 'claimed', 'open', 'paused',
   'success', 'completed', 'confirmed', 'failed', 'pending',
+  'connected', 'disconnected', 'error',
   'cancelled', 'dismissed', 'concluded',
 ])
 // Asset types are also known — we use them raw (no lowercase) because they're
@@ -65,8 +66,8 @@ const cls = computed(() => {
 .b-running, .b-queued, .b-claimed, .b-open { color: var(--aurora-bright); background: rgba(95, 200, 212, 0.1); border-color: rgba(95, 200, 212, 0.36); }
 .b-running .b-dot, .b-queued .b-dot, .b-claimed .b-dot, .b-open .b-dot { box-shadow: 0 0 6px currentColor; animation: badge-pulse 2s ease-in-out infinite; }
 .b-paused { color: var(--stellar-bright); background: rgba(125, 146, 232, 0.1); border-color: rgba(125, 146, 232, 0.3); }
-.b-success, .b-completed, .b-confirmed { color: var(--ok); background: rgba(95, 200, 154, 0.1); border-color: rgba(95, 200, 154, 0.32); }
-.b-failed { color: var(--danger); background: rgba(226, 100, 114, 0.1); border-color: rgba(226, 100, 114, 0.32); }
+.b-success, .b-completed, .b-confirmed, .b-connected { color: var(--ok); background: rgba(95, 200, 154, 0.1); border-color: rgba(95, 200, 154, 0.32); }
+.b-failed, .b-disconnected, .b-error { color: var(--danger); background: rgba(226, 100, 114, 0.1); border-color: rgba(226, 100, 114, 0.32); }
 .b-pending { color: var(--text-dim); }
 .b-cancelled { color: var(--warn); background: rgba(217, 168, 97, 0.1); border-color: rgba(217, 168, 97, 0.3); }
 .b-dismissed { color: var(--text-faint); }
