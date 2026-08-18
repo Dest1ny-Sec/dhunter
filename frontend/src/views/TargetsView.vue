@@ -377,8 +377,8 @@ onBeforeUnmount(() => {
       </div>
       <div>
         <label class="field-label">授权说明（可选，写入报告留痕：谁授权的 / 书面许可引用）</label>
-        <input v-model="authorization" style="width: 100%; font-size: 12.5px"
-          placeholder="例如：甲方 XX 公司书面授权，编号 TX-2026-001，授权人 张三" />
+        <textarea v-model="authorization" rows="2" style="width: 100%; font-size: 12.5px"
+          placeholder="例如：甲方 XX 公司书面授权，编号 TX-2026-001，授权人 张三&#10;授权范围：全部外部资产 + 移动 app&#10;紧急联系：zhangsan@example.com" />
       </div>
       <div v-if="error" class="form-error">
         <Icon name="alert" :size="14" />

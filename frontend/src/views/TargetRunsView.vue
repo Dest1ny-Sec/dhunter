@@ -7,6 +7,10 @@ import SeverityBadge from '../components/SeverityBadge.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import UiCard from '../components/ui/UiCard.vue'
+
+type AssetType = 'root-domain' | 'subdomain' | 'ip' | 'service' | 'app' | 'endpoint'
+interface Asset { id: string; target_id: string; type: AssetType | string; value: string; parent_id?: string; meta?: string }
 
 const route = useRoute()
 const router = useRouter()
@@ -14,10 +18,18 @@ const targetId = computed(() => route.params.id as string)
 
 const target = ref<any>(null)
 const runs = ref<any[]>([])
+const assets = ref<Asset[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
 
 const vulnsByRun = ref<Record<string, number>>({})
+
+// O(1) parent lookups (was O(n) find() per asset in worst case).
+const assetById = computed(() => {
+  const m = new Map<string, Asset>()
+  for (const a of assets.value) m.set(a.id, a)
+  return m
+})
 
 function fmtN(n?: number): string {
   if (n == null) return '—'
@@ -67,16 +79,19 @@ async function load() {
 }
 
 // 资产清单（结构化发现：子域/端点/服务...），树优先展示。
-const assets = ref<any[]>([])
+// 6 个已知类型走中文；后端以后新增类型时回退到 raw key（前端不假装翻译它不认识的东西）。
 const assetTypeLabel: Record<string, string> = {
   'root-domain': '根域', subdomain: '子域', ip: 'IP', service: '服务', app: '应用', endpoint: '端点',
 }
-function assetDepth(a: any, depth = 0, seen = new Set()): number {
+function assetDepth(a: Asset, depth = 0, seen = new Set<string>()): number {
   if (!a.parent_id || seen.has(a.id)) return depth
-  const p = assets.value.find((x) => x.id === a.parent_id)
+  const p = assetById.value.get(a.parent_id)
   if (!p) return depth
   seen.add(a.id)
   return assetDepth(p, depth + 1, seen)
+}
+function assetBadgeLabel(a: Asset): string {
+  return assetTypeLabel[a.type] ?? `未知:${a.type}`
 }
 
 function startNewRun() {
@@ -217,23 +232,21 @@ onMounted(load)
         <code>{{ compareResult.b.id.slice(0, 8) }}</code>（{{ compareResult.b.started_at ? fmtTime(compareResult.b.started_at) : '—' }}），已忽略 dismissed 记录
       </div>
     </div>
-    <UiEmpty v-else-if="!loading" icon="◇" message="该项目还没有评估记录，点击右上角发起一次" />
-
     <!-- 资产清单：agent 结构化发现（子域/端点/服务），parent 缩进成树 -->
-    <div v-if="assets.length" class="card" style="margin-top: 14px">
-      <div class="row" style="margin-bottom: 8px">
-        <h3 style="font-size: 14px; font-weight: 600; margin: 0">资产清单（{{ assets.length }}）</h3>
-        <span class="spacer" />
+    <UiCard v-if="assets.length" :title="`资产清单（${assets.length}）`">
+      <template #actions>
         <span class="muted" style="font-size: 11px">agent 侦察过程中自动沉淀，跨运行累积</span>
-      </div>
-      <div class="asset-list">
+      </template>
+      <div class="asset-list stagger">
         <div v-for="a in assets" :key="a.id" class="asset-row" :style="{ paddingLeft: (assetDepth(a) * 18 + 4) + 'px' }">
-          <span class="pill" style="font-size: 10px">{{ assetTypeLabel[a.type] || a.type }}</span>
+          <UiBadge kind="asset" :value="a.type">{{ assetBadgeLabel(a) }}</UiBadge>
           <code style="font-size: 12px; word-break: break-all">{{ a.value }}</code>
           <span v-if="a.meta" class="muted" style="font-size: 11px; margin-left: 8px">{{ a.meta }}</span>
         </div>
       </div>
-    </div>
+    </UiCard>
+
+    <UiEmpty v-else-if="!loading" icon="◇" message="该项目还没有评估记录，点击右上角发起一次" />
   </div>
 </template>
 
@@ -262,7 +275,15 @@ onMounted(load)
 .cmp-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
 .cmp-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .cmp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.asset-list { display: flex; flex-direction: column; }
-.asset-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.asset-list { display: flex; flex-direction: column; gap: 0; }
+.asset-row {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12.5px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.asset-row:hover { background: rgba(125, 146, 232, 0.04); }
 .asset-row:last-child { border-bottom: none; }
 </style>

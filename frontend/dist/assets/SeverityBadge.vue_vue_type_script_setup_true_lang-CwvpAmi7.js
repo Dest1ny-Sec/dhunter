@@ -1,1 +1,0 @@
-import{U as r}from"./UiBadge-Cp4KxKy8.js";import{d as o,o as t,x as a}from"./index-AXyzn251.js";const p=o({__name:"SeverityBadge",props:{severity:{}},setup(e){return(n,s)=>(t(),a(r,{kind:"severity",value:e.severity||"info"},null,8,["value"]))}});export{p as _};
