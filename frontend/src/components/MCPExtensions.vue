@@ -8,13 +8,69 @@
  * Style: matches the rest of the Settings page (stargaze design — dark,
  * glassy, multi-hue star accents, JetBrains Mono for IDs).
  */
-import { onMounted, ref, reactive } from 'vue'
+import { onMounted, ref, reactive, computed, h } from 'vue'
 import { api } from '../api/client'
 import UiCard from './ui/UiCard.vue'
 import UiButton from './ui/UiButton.vue'
 import UiBadge from './ui/UiBadge.vue'
 import UiEmpty from './ui/UiEmpty.vue'
 import UiModal from './ui/UiModal.vue'
+
+// --- inline icon set (no external deps) ------------------------------
+// Each icon is a 16×16 viewBox stroke; color follows currentColor so a
+// single `color:` style drives the whole glyph. We use these for the
+// per-row action buttons + section header — gives the row a
+// "instrument panel" feel that bare text buttons can't match.
+const icons = {
+  // 16x16 stroke icons
+  refresh: () => h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+    h('path', { d: 'M2 4h3l1.5-2' }),
+    h('path', { d: 'M14 12h-3l-1.5 2' }),
+    h('path', { d: 'M14 4a6 6 0 0 0-10.5-1' }),
+    h('path', { d: 'M2 12a6 6 0 0 0 10.5 1' }),
+  ]),
+  plus: () => h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round' }, [
+    h('path', { d: 'M8 3v10M3 8h10' }),
+  ]),
+  // 14x14 row-action icons (tighter to fit the row button height)
+  plug: () => h('svg', { width: 13, height: 13, viewBox: '0 0 14 14', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+    h('path', { d: 'M3.5 4.5h7' }),
+    h('path', { d: 'M5 4.5v3' }),
+    h('path', { d: 'M9 4.5v3' }),
+    h('path', { d: 'M5 7.5h4v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2z' }),
+    h('path', { d: 'M7 11.5v2' }),
+  ]),
+  edit: () => h('svg', { width: 13, height: 13, viewBox: '0 0 14 14', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+    h('path', { d: 'M2.5 11.5l1-3 6-6 2 2-6 6-3 1z' }),
+    h('path', { d: 'M8 4l2 2' }),
+  ]),
+  trash: () => h('svg', { width: 13, height: 13, viewBox: '0 0 14 14', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+    h('path', { d: 'M2.5 4h9' }),
+    h('path', { d: 'M5 4V2.5h4V4' }),
+    h('path', { d: 'M3.5 4l.7 7.5h5.6L10.5 4' }),
+    h('path', { d: 'M6 6.5v3.5M8 6.5v3.5' }),
+  ]),
+  lock: () => h('svg', { width: 11, height: 11, viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+    h('rect', { x: 2.5, y: 5.5, width: 7, height: 5, rx: 1 }),
+    h('path', { d: 'M4 5.5V4a2 2 0 0 1 4 0v1.5' }),
+  ]),
+  unlock: () => h('svg', { width: 11, height: 11, viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+    h('rect', { x: 2.5, y: 5.5, width: 7, height: 5, rx: 1 }),
+    h('path', { d: 'M4 5.5V4a2 2 0 0 1 4 0' }),
+  ]),
+  // Empty-state illustration: a small "constellation" of three stars
+  // + a connecting line. Hand-tuned to the stargaze palette.
+  emptyStars: () => h('svg', { width: 96, height: 64, viewBox: '0 0 96 64', fill: 'none' }, [
+    h('circle', { cx: 20, cy: 32, r: 1.5, fill: 'var(--stellar)', opacity: 0.9 }),
+    h('circle', { cx: 48, cy: 18, r: 2.2, fill: 'var(--aurora-bright)' }),
+    h('circle', { cx: 76, cy: 38, r: 1.8, fill: 'var(--nebula)', opacity: 0.85 }),
+    h('circle', { cx: 64, cy: 50, r: 1, fill: 'var(--stellar-bright)' }),
+    h('circle', { cx: 30, cy: 52, r: 1, fill: 'var(--stellar)', opacity: 0.6 }),
+    h('line', { x1: 20, y1: 32, x2: 48, y2: 18, stroke: 'var(--border-bright)', 'stroke-width': 0.6, 'stroke-dasharray': '2 3', opacity: 0.6 }),
+    h('line', { x1: 48, y1: 18, x2: 76, y2: 38, stroke: 'var(--border-bright)', 'stroke-width': 0.6, 'stroke-dasharray': '2 3', opacity: 0.6 }),
+    h('line', { x1: 76, y1: 38, x2: 64, y2: 50, stroke: 'var(--border-bright)', 'stroke-width': 0.6, 'stroke-dasharray': '2 3', opacity: 0.6 }),
+  ]),
+}
 
 interface MCPServer {
   id: string
@@ -24,6 +80,8 @@ interface MCPServer {
   has_token: boolean
   enabled: boolean
   description?: string
+  private?: boolean
+  private_note?: string
   created_at: string
   updated_at: string
 }
@@ -177,6 +235,70 @@ async function testConnection(s: MCPServer) {
 // --- Reload (sync to agent) ------------------------------------------
 const reloading = ref(false)
 const reloadMsg = ref('')
+
+// --- helpers ----------------------------------------------------------
+function copy(text: string) {
+  navigator.clipboard?.writeText(text).catch(() => {})
+}
+
+// --- per-row live status (agent side) --------------------------------
+// The agent's /v1/mcp/status snapshot — drives the "上次同步" indicator
+// and the per-row green/gray dot. We poll on mount + after every reload
+// + every 15s while the page is open.
+interface AgentServer {
+  name: string
+  status: 'connected' | 'error' | 'unknown'
+  tool_count: number
+  error: string
+  truncated?: boolean
+  raw_tool_count?: number
+}
+interface AgentSync {
+  last_reload_at: number
+  last_reload_error: string
+  servers: AgentServer[]
+}
+const agentSync = ref<AgentSync | null>(null)
+const agentStatusError = ref<string>('')  // 'agent offline' / ''
+
+async function loadAgentSync() {
+  try {
+    const r = await api.get('/mcp-servers/agent-status')
+    agentSync.value = r.data
+    agentStatusError.value = ''
+  } catch (e: any) {
+    // 502 = agent bridge call failed (network); 503 = no bridge wired
+    agentStatusError.value = e?.response?.data?.error || e?.message || 'agent offline'
+  }
+}
+
+function agentStatusByName(name: string): AgentServer | undefined {
+  return agentSync.value?.servers?.find((s) => s.name === name)
+}
+
+// "刚刚" / "2 分钟前" / "5 小时前" / "2 天前" / "—"
+function relTime(ts: number): string {
+  if (!ts) return '—'
+  const diff = Math.max(0, Date.now() / 1000 - ts)
+  if (diff < 30) return '刚刚'
+  if (diff < 60) return `${Math.floor(diff)} 秒前`
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  return `${Math.floor(diff / 86400)} 天前`
+}
+
+let syncTimer: number | null = null
+onMounted(() => {
+  loadAgentSync()
+  syncTimer = window.setInterval(loadAgentSync, 15000)
+})
+import { onBeforeUnmount } from 'vue'
+onBeforeUnmount(() => {
+  if (syncTimer) window.clearInterval(syncTimer)
+})
+
+// Refresh the agent snapshot right after a manual reload completes,
+// so the user sees the new "刚刚" without waiting for the next poll.
 async function reloadAgent() {
   reloading.value = true
   reloadMsg.value = ''
@@ -184,6 +306,7 @@ async function reloadAgent() {
     const r = await api.post('/mcp-servers/reload')
     const { connected, reloaded } = r.data || {}
     reloadMsg.value = `已重载 ${reloaded} 个外部 MCP，${connected} 个已连接`
+    await loadAgentSync()
   } catch (e: any) {
     reloadMsg.value = '✕ ' + (e?.response?.data?.error || e?.message || '重载失败')
   } finally {
@@ -192,10 +315,38 @@ async function reloadAgent() {
   }
 }
 
-// --- helpers ----------------------------------------------------------
-function copy(text: string) {
-  navigator.clipboard?.writeText(text).catch(() => {})
+// --- per-row visual helpers ------------------------------------------
+// green = connected, red = error, gray = unknown / agent hasn't seen
+function rowDotClass(s: MCPServer): string {
+  if (agentStatusError.value) return 'gray'
+  const a = agentStatusByName(s.name)
+  if (!a) return 'gray' // never reloaded
+  if (a.status === 'connected') return 'green'
+  if (a.status === 'error') return 'red'
+  return 'gray'
 }
+function rowDotTitle(s: MCPServer): string {
+  if (agentStatusError.value) return 'Agent 不可达 — 状态未知'
+  const a = agentStatusByName(s.name)
+  if (!a) return 'Agent 尚未加载此 server（点 同步到 Agent 试试）'
+  if (a.status === 'connected') return `已连接 · ${a.tool_count} 个工具`
+  if (a.status === 'error') return `连接失败: ${a.error || '未知错误'}`
+  return '状态未知'
+}
+function rowStatusText(s: MCPServer): string {
+  if (agentStatusError.value) return 'agent 离线'
+  const a = agentStatusByName(s.name)
+  if (!a) return '未同步到 agent'
+  if (a.status === 'connected') return `${a.tool_count} 个工具就绪`
+  if (a.status === 'error') return `失败: ${a.error || '未知'}`
+  return '未知状态'
+}
+const agentDotClass = computed(() => {
+  if (agentStatusError.value) return 'red'
+  if (!agentSync.value || !agentSync.value.last_reload_at) return 'gray'
+  if (agentSync.value.last_reload_error) return 'red'
+  return 'green'
+})
 </script>
 
 <template>
@@ -213,6 +364,24 @@ function copy(text: string) {
         <UiButton variant="primary" @click="openAdd">+ 添加扩展</UiButton>
       </div>
     </div>
+    <!-- Agent-side sync indicator. Shows the most recent successful
+         reload timestamp + the agent's overall health. Per-row dots
+         below carry the per-server detail. -->
+    <div class="sync-line">
+      <span class="sync-dot" :class="agentDotClass" />
+      <span class="sync-text">
+        <template v-if="agentStatusError">
+          Agent 不可达 · 上次同步未知
+        </template>
+        <template v-else-if="!agentSync || !agentSync.last_reload_at">
+          从未同步 · 点右上「同步到 Agent」开始
+        </template>
+        <template v-else>
+          Agent 已同步 · {{ relTime(agentSync.last_reload_at) }}
+          <span v-if="agentSync.last_reload_error" class="sync-warn"> · {{ agentSync.last_reload_error }}</span>
+        </template>
+      </span>
+    </div>
     <div v-if="reloadMsg" class="reload-msg">{{ reloadMsg }}</div>
     <div v-if="error" class="error-msg">{{ error }}</div>
 
@@ -229,9 +398,22 @@ function copy(text: string) {
             <span class="name">{{ s.name }}</span>
             <UiBadge kind="status" :value="s.enabled ? 'enabled' : 'disabled'" :dot="true" />
             <UiBadge v-if="s.has_token" kind="status" value="with-token" />
+            <!-- 内网/云元数据地址提示（SSRF 面可见性） -->
+            <span v-if="s.private" class="priv-hint" :title="s.private_note || '内网地址'">⚠ {{ s.private_note || '内网地址' }}</span>
+            <!-- 工具列表被截断提示（agent 侧每 server 上限） -->
+            <span v-if="agentStatusByName(s.name)?.truncated" class="priv-hint" title="该 server 工具数超过上限，已截断">
+              ✂ 已截断（{{ agentStatusByName(s.name)?.raw_tool_count }} → 100）
+            </span>
           </div>
           <div class="url">{{ s.url }}</div>
           <div v-if="s.description" class="desc">{{ s.description }}</div>
+          <!-- Per-row live dot: green = agent has it connected & tools
+               loaded; red = agent tried and errored; gray = not yet seen
+               by the agent (never reloaded, or config changed since). -->
+          <div class="row-status" v-if="s.enabled">
+            <span class="row-dot" :class="rowDotClass(s)" :title="rowDotTitle(s)" />
+            <span class="row-status-text">{{ rowStatusText(s) }}</span>
+          </div>
         </div>
         <div class="row-actions">
           <UiButton size="sm" :disabled="testingId === s.id" @click="testConnection(s)">
@@ -334,6 +516,29 @@ function copy(text: string) {
 .reload-msg { font-size: 12.5px; color: var(--ok); margin-bottom: 10px; }
 .error-msg { font-size: 12.5px; color: var(--danger); margin-bottom: 10px; }
 
+/* Agent-side sync indicator: one line under the head */
+.sync-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); margin-bottom: 12px; }
+.sync-text { font-family: 'JetBrains Mono', monospace; }
+.sync-warn { color: var(--warn); }
+
+/* Shared dot — color set by the `green|red|gray` class */
+.sync-dot, .row-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.sync-dot.green, .row-dot.green { background: var(--ok); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+.sync-dot.red,   .row-dot.red   { background: var(--danger); box-shadow: 0 0 0 4px rgba(232, 89, 89, 0.15); }
+.sync-dot.gray,  .row-dot.gray  { background: var(--text-faint); }
+
+/* Per-row live status line (sits under the description) */
+.row-status { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--text-faint); }
+.row-status-text { font-family: 'JetBrains Mono', monospace; }
+
 .list { display: flex; flex-direction: column; gap: 8px; }
 .row {
   display: flex; justify-content: space-between; align-items: center; gap: 16px;
@@ -346,6 +551,11 @@ function copy(text: string) {
 .row:hover { border-color: var(--border-bright); }
 .meta { min-width: 0; flex: 1; }
 .row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.priv-hint {
+  font-size: 11px; color: var(--warn);
+  border: 1px solid rgba(245,158,11,0.35); background: rgba(245,158,11,0.08);
+  border-radius: 999px; padding: 1px 8px;
+}
 .name { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 500; color: var(--stellar-bright); }
 .url { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); word-break: break-all; }
 .desc { font-size: 12px; color: var(--text-faint); margin-top: 2px; }

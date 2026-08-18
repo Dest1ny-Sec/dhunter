@@ -146,18 +146,19 @@ type Finding struct {
 
 // Stores bundles every store the API handlers need.
 type Stores struct {
-	DB        *db.DB
-	Targets   *TargetStore
-	Runs      *RunStore
-	Messages  *MessageStore
-	Vulns     *VulnStore
-	ToolCalls *ToolCallStore
-	Findings  *FindingStore
-	Board     *Board
-	Settings  *SettingsStore
-	Knowledge *KnowledgeStore
-	Assets    *AssetStore
+	DB         *db.DB
+	Targets    *TargetStore
+	Runs       *RunStore
+	Messages   *MessageStore
+	Vulns      *VulnStore
+	ToolCalls  *ToolCallStore
+	Findings   *FindingStore
+	Board      *Board
+	Settings   *SettingsStore
+	Knowledge  *KnowledgeStore
+	Assets     *AssetStore
 	MCPServers *MCPServerStore
+	Skills     *SkillStore
 }
 
 // New constructs every store over the shared *db.DB.
@@ -175,6 +176,7 @@ func New(database *db.DB) *Stores {
 		Knowledge:  &KnowledgeStore{db: database},
 		Assets:     &AssetStore{db: database},
 		MCPServers: &MCPServerStore{db: database},
+		Skills:     &SkillStore{db: database},
 	}
 }
 
@@ -1292,6 +1294,12 @@ type MCPServer struct {
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Private / PrivateNote are DERIVED (never persisted): the handler sets
+	// them from the URL so the UI can warn when a server points at a
+	// loopback/private/metadata address (SSRF-ish surface — fine for local
+	// infra, worth a yellow hint otherwise).
+	Private     bool   `json:"private,omitempty"`
+	PrivateNote string `json:"private_note,omitempty"`
 	// includeToken forces the Token field into the JSON response. The
 	// Create handler sets it on its returned value; the other handlers
 	// leave it false so reads always see redacted payloads.
@@ -1314,13 +1322,16 @@ func (m MCPServer) MarshalJSON() ([]byte, error) {
 		HasToken    bool      `json:"has_token"`
 		Enabled     bool      `json:"enabled"`
 		Description string    `json:"description,omitempty"`
+		Private     bool      `json:"private,omitempty"`
+		PrivateNote string    `json:"private_note,omitempty"`
 		CreatedAt   time.Time `json:"created_at"`
 		UpdatedAt   time.Time `json:"updated_at"`
 	}
 	out := alias{
 		ID: m.ID, Name: m.Name, URL: m.URL, Transport: m.Transport,
 		Token: m.Token, HasToken: m.HasToken, Enabled: m.Enabled,
-		Description: m.Description, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+		Description: m.Description, Private: m.Private, PrivateNote: m.PrivateNote,
+		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 	if !m.includeToken {
 		out.Token = ""
@@ -1488,4 +1499,157 @@ func scanMCPServer(r rowScanner) (*MCPServer, error) {
 	m.Token = token
 	m.HasToken = token != ""
 	return &m, nil
+}
+
+// ----- SkillStore -----
+
+// Skill is a user-installable agent capability — a markdown prompt
+// the agent reads into context (system or per-tool instructions).
+// Built-in skills are seeded at first run; user-defined skills come
+// from the Library → Skills tab in the UI.
+type Skill struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`        // kebab/snake case, unique
+	Title       string    `json:"title"`       // human-friendly display
+	Description string    `json:"description"` // 1-line summary
+	Content     string    `json:"content"`     // the prompt body (markdown)
+	Category    string    `json:"category"`    // web | api | fuzz | reporting | ...
+	Tags        string    `json:"tags"`        // comma-separated, for filtering
+	Enabled     bool      `json:"enabled"`
+	Source      string    `json:"source"`      // builtin | community | custom
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// SkillStore persists skills.
+type SkillStore struct{ db *db.DB }
+
+// Create inserts a new skill. ID and timestamps are populated if zero.
+func (s *SkillStore) Create(ctx context.Context, sk *Skill) error {
+	if sk.ID == "" {
+		sk.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	if sk.CreatedAt.IsZero() {
+		sk.CreatedAt = now
+	}
+	sk.UpdatedAt = now
+	if sk.Source == "" {
+		sk.Source = "custom"
+	}
+	if sk.Category == "" {
+		sk.Category = "general"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO skills (id, name, title, description, content, category, tags, enabled, source, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sk.ID, sk.Name, sk.Title, sk.Description, sk.Content, sk.Category, sk.Tags, boolInt(sk.Enabled), sk.Source,
+		sk.CreatedAt.UnixMilli(), sk.UpdatedAt.UnixMilli())
+	return err
+}
+
+// Update modifies an existing skill. Built-in skills should be
+// enabled/disabled via Toggle, not edited — the UI gates Edit to
+// `source='custom'`, but the store allows it for now.
+func (s *SkillStore) Update(ctx context.Context, sk *Skill) error {
+	sk.UpdatedAt = time.Now().UTC()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE skills SET
+			title = ?, description = ?, content = ?, category = ?, tags = ?,
+			enabled = ?, source = ?, updated_at = ?
+		 WHERE id = ?`,
+		sk.Title, sk.Description, sk.Content, sk.Category, sk.Tags,
+		boolInt(sk.Enabled), sk.Source, sk.UpdatedAt.UnixMilli(), sk.ID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Toggle flips `enabled` without touching the rest. Used by the UI's
+// inline on/off switch — avoids round-tripping the full content.
+func (s *SkillStore) Toggle(ctx context.Context, id string, enabled bool) error {
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE skills SET enabled = ?, updated_at = ? WHERE id = ?`,
+		boolInt(enabled), now.UnixMilli(), id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a skill by id. Built-in skills should NOT be deleted
+// from the UI; the store allows it (e.g. for tests / cleanup).
+func (s *SkillStore) Delete(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM skills WHERE id = ?`, id)
+	return err
+}
+
+// Get returns one skill by id.
+func (s *SkillStore) Get(ctx context.Context, id string) (*Skill, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, title, description, content, category, tags, enabled, source, created_at, updated_at
+		 FROM skills WHERE id = ?`, id)
+	return scanSkill(row)
+}
+
+// List returns all skills, newest first. If `source` is non-empty,
+// filter to that source. (We keep this single-table for simplicity —
+// the Library tab's left sidebar does the 官方/社区/已装/自定义
+// bucketing in the UI by reading the `source` field.)
+func (s *SkillStore) List(ctx context.Context, source string) ([]*Skill, error) {
+	q := `SELECT id, name, title, description, content, category, tags, enabled, source, created_at, updated_at
+	      FROM skills`
+	args := []any{}
+	if source != "" {
+		q += ` WHERE source = ?`
+		args = append(args, source)
+	}
+	q += ` ORDER BY source ASC, name ASC` // builtin first, then alpha
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*Skill, 0)
+	for rows.Next() {
+		sk, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sk)
+	}
+	return out, rows.Err()
+}
+
+// GetByName returns a skill by its stable name (used by seed to make
+// Create idempotent).
+func (s *SkillStore) GetByName(ctx context.Context, name string) (*Skill, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, title, description, content, category, tags, enabled, source, created_at, updated_at
+		 FROM skills WHERE name = ?`, name)
+	return scanSkill(row)
+}
+
+func scanSkill(r rowScanner) (*Skill, error) {
+	var sk Skill
+	var cMs, uMs int64
+	if err := r.Scan(&sk.ID, &sk.Name, &sk.Title, &sk.Description, &sk.Content, &sk.Category, &sk.Tags, &sk.Enabled, &sk.Source, &cMs, &uMs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	sk.CreatedAt = time.UnixMilli(cMs).UTC()
+	sk.UpdatedAt = time.UnixMilli(uMs).UTC()
+	return &sk, nil
 }

@@ -221,6 +221,37 @@ withDefaults(defineProps<{
       <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
       <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z" />
     </template>
+
+    <!-- library / collection (3 stacked horizontal books) -->
+    <template v-else-if="name === 'library'">
+      <rect x="3" y="5"  width="18" height="3" rx="0.6" />
+      <rect x="3" y="10.5" width="18" height="3" rx="0.6" />
+      <rect x="3" y="16" width="18" height="3" rx="0.6" />
+      <line x1="6" y1="5" x2="6" y2="8" />
+      <line x1="6" y1="10.5" x2="6" y2="13.5" />
+      <line x1="6" y1="16" x2="6" y2="19" />
+    </template>
+
+    <!-- plug (MCP connect) -->
+    <template v-else-if="name === 'plug'">
+      <path d="M6 6 L6 11 A4 4 0 0 0 10 15 L14 15 A4 4 0 0 0 18 11 L18 6" />
+      <line x1="10" y1="3" x2="10" y2="6" />
+      <line x1="18" y1="3" x2="18" y2="6" />
+      <line x1="12" y1="15" x2="12" y2="20" />
+    </template>
+
+    <!-- puzzle (skill — modular plug-in) -->
+    <template v-else-if="name === 'puzzle'">
+      <path d="M10 3 H14 V6 A2 2 0 0 0 18 6 V10 H21 V14 H18 A2 2 0 0 0 18 18 V21 H14 V18 A2 2 0 0 0 10 18 V14 H3 V10 H6 A2 2 0 0 0 6 6 V3 Z" />
+    </template>
+
+    <!-- template (grid of squares) -->
+    <template v-else-if="name === 'template'">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </template>
   </svg>
 </template>
 

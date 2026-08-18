@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ import (
 // the real client; tests can pass a stub.
 type AgentClient interface {
 	ReloadMCPs(ctx context.Context) (int, int, error) // connected, total, err
+	MCPStatus(ctx context.Context) (map[string]any, error)
 }
 
 // HTTPAgentClient is the production AgentClient: it POSTs to the
@@ -70,6 +73,44 @@ func (a *HTTPAgentClient) ReloadMCPs(ctx context.Context) (int, int, error) {
 	return out.Connected, out.Reloaded, nil
 }
 
+// MCPStatus proxies GET /v1/mcp/status — the agent's snapshot of its
+// external MCP connections (per-server ready/error, last_reload_at).
+// The Settings UI uses this to render the "上次同步" indicator and
+// per-row green/gray dots.
+func (a *HTTPAgentClient) MCPStatus(ctx context.Context) (map[string]any, error) {
+	if a == nil || a.BaseURL == "" {
+		return nil, fmt.Errorf("agent not configured")
+	}
+	url := strings.TrimRight(a.BaseURL, "/") + "/v1/mcp/status"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if a.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.Token)
+	}
+	timeout := a.Timeout
+	if timeout <= 0 {
+		timeout = 8 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("agent status HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	var out map[string]any
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("agent status: decode: %w", err)
+	}
+	return out, nil
+}
+
 // MCPHandler handles CRUD + connection-test for user-configured external
 // MCP servers (the "extension center"). Built-in dhunter-mcp is unaffected
 // and is always-on via env vars — the rows here are pure add-ons.
@@ -97,14 +138,13 @@ type createMCPReq struct {
 	Description string `json:"description"`
 }
 
-// updateMCPReq is the JSON body for PUT /api/mcp-servers/:id. Token is
-// optional — omitted means "keep the stored token".
+// updateMCPReq is the JSON body for PUT /api/mcp-servers/:id.
 type updateMCPReq struct {
 	Name        string `json:"name"`
 	URL         string `json:"url"`
 	Transport   string `json:"transport"`
-	Token       string `json:"token"`        // empty = keep; non-empty = replace; "__clear__" = wipe
-	ClearToken  bool   `json:"clear_token"`  // explicit alternative to the magic-string
+	Token       string `json:"token"`       // empty = keep; non-empty = replace
+	ClearToken  bool   `json:"clear_token"` // explicit wipe (frontend sends this)
 	Enabled     *bool  `json:"enabled"`
 	Description string `json:"description"`
 }
@@ -116,6 +156,9 @@ func (h *MCPHandler) List(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	for _, m := range rows {
+		annotatePrivate(m)
 	}
 	c.JSON(http.StatusOK, gin.H{"servers": rows})
 }
@@ -132,6 +175,7 @@ func (h *MCPHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	annotatePrivate(m)
 	c.JSON(http.StatusOK, m)
 }
 
@@ -186,6 +230,7 @@ func (h *MCPHandler) Create(c *gin.Context) {
 	// Reflect the just-stored token in HasToken so the response
 	// truthfully reports whether a credential is on file.
 	m.HasToken = m.Token != ""
+	annotatePrivate(m)
 	// Token is returned exactly once so the caller can save it. All
 	// later reads (List/Get/Update) redact it via the MCPServer custom
 	// MarshalJSON method.
@@ -269,6 +314,7 @@ func (h *MCPHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	annotatePrivate(final)
 	c.JSON(http.StatusOK, final)
 }
 
@@ -339,6 +385,26 @@ func (h *MCPHandler) Reload(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"reloaded": total, "connected": connected})
 }
+
+// AgentStatus handles GET /api/mcp-servers/agent-status — proxies the
+// agent's external MCP snapshot (per-server ready/error and
+// last_reload_at). The UI uses this for the "上次同步" indicator and
+// per-row green/gray dots. Returns 502 when the agent is unreachable;
+// the frontend treats that as "agent offline — last sync unknown".
+func (h *MCPHandler) AgentStatus(c *gin.Context) {
+	if h.Agent == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent bridge not configured"})
+		return
+	}
+	st, err := h.Agent.MCPStatus(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, st)
+}
+
+// Active handles GET /api/mcp-servers/active — returns only the enabled
 // servers AND exposes the (otherwise redacted) token. This endpoint is
 // exclusively for the Python agent, which needs the token to auth when
 // it bootstraps. Same Bearer auth as the rest of /api, so the agent
@@ -499,4 +565,49 @@ func truncateForErr(s string, n int) string {
 
 func isHTTPUrl(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+// classifyURLPrivate flags addresses the UI should hint about: loopback,
+// private ranges, link-local, the cloud metadata service (169.254.169.254),
+// and well-known metadata hostnames. We do NOT block these — a user may
+// legitimately point at an internal MCP server — but the UI shows a yellow
+// warning so an accidental metadata/内网 URL is visible at a glance.
+func classifyURLPrivate(raw string) (bool, string) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return false, ""
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.String() == "169.254.169.254" {
+			return true, "云元数据服务地址（169.254.169.254）"
+		}
+		switch {
+		case ip.IsLoopback():
+			return true, "回环地址（本机）"
+		case ip.IsPrivate():
+			return true, "私有网段（内网）"
+		case ip.IsLinkLocalUnicast():
+			return true, "链路本地地址"
+		case ip.IsUnspecified():
+			return true, "未指定地址"
+		}
+		return false, ""
+	}
+	lh := strings.ToLower(host)
+	switch {
+	case lh == "localhost" || strings.HasSuffix(lh, ".localhost"):
+		return true, "localhost（本机）"
+	case lh == "metadata.google.internal" || lh == "instance-data" || lh == "instance-data.ec2.internal":
+		return true, "云元数据服务主机名"
+	}
+	return false, ""
+}
+
+// annotatePrivate derives and sets the Private/PrivateNote fields on the
+// server (derived per-response; nothing is persisted).
+func annotatePrivate(m *store.MCPServer) {
+	priv, note := classifyURLPrivate(m.URL)
+	m.Private = priv
+	m.PrivateNote = note
 }

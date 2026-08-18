@@ -42,6 +42,12 @@ const navGroups = ref<NavGroup[]>([
     ],
   },
   {
+    key: 'library', label: '库',
+    items: [
+      { name: 'library', label: '库', path: '/library', icon: 'library' },
+    ],
+  },
+  {
     key: 'system', label: '系统',
     items: [
       { name: 'settings', label: '设置', path: '/settings', icon: 'settings' },

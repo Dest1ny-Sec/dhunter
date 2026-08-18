@@ -154,6 +154,20 @@ function toolArgUrl(t: any): string {
   return ''
 }
 
+// External tools are namespaced as `<server>::<tool>` by the MCP
+// extension center. Surface that fact with a small badge so the user
+// can tell at a glance which calls hit user-supplied servers vs the
+// built-in 22 tools.
+function isExternalTool(name?: string): boolean {
+  return !!name && name.includes('::')
+}
+function splitTool(name?: string): { server: string; tool: string } | null {
+  if (!name) return null
+  const i = name.indexOf('::')
+  if (i < 0) return null
+  return { server: name.slice(0, i), tool: name.slice(i + 2) }
+}
+
 function fmtTime(s?: string) {
   if (!s) return '—'
   try { return new Date(s).toLocaleString() } catch { return s }
@@ -390,7 +404,15 @@ watch(runId, async (v) => {
     <div v-if="tab === 'tools'" class="card" style="padding: 0">
       <div v-if="toolActivity.length" class="tool-log">
         <div v-for="t in toolActivity" :key="t.id" class="tool-line">
-          <span class="tool-name"><code>{{ t.name }}</code></span>
+          <span class="tool-name">
+            <template v-if="isExternalTool(t.name)">
+              <code class="ext-tool">{{ splitTool(t.name)?.server }}<span class="ns">::</span><span class="ext-tail">{{ splitTool(t.name)?.tool }}</span></code>
+              <span class="ext-badge" :title="`外部 MCP: ${splitTool(t.name)?.server}`">External</span>
+            </template>
+            <template v-else>
+              <code>{{ t.name }}</code>
+            </template>
+          </span>
           <span class="tool-url muted">{{ toolArgUrl(t) }}</span>
           <span class="spacer" />
           <span class="tool-status" :style="{ color: t.is_error ? 'var(--danger)' : 'var(--ok)' }">{{ t.is_error ? 'error' : 'ok' }}</span>
@@ -424,7 +446,15 @@ watch(runId, async (v) => {
             <thead><tr><th>工具</th><th>状态</th><th>时间</th></tr></thead>
             <tbody>
               <tr v-for="(tc, i) in toolCalls" :key="i">
-                <td><code style="font-size: 11px">{{ tc.call.data?.name || tc.call.data?.tool || '?' }}</code></td>
+                <td>
+                  <template v-if="isExternalTool(tc.call.data?.name || tc.call.data?.tool)">
+                    <code style="font-size: 11px" class="ext-tool">{{ splitTool(tc.call.data?.name || tc.call.data?.tool)?.server }}<span class="ns">::</span>{{ splitTool(tc.call.data?.name || tc.call.data?.tool)?.tool }}</code>
+                    <span class="ext-badge" :title="`外部 MCP: ${splitTool(tc.call.data?.name || tc.call.data?.tool)?.server}`">External</span>
+                  </template>
+                  <template v-else>
+                    <code style="font-size: 11px">{{ tc.call.data?.name || tc.call.data?.tool || '?' }}</code>
+                  </template>
+                </td>
                 <td>
                   <span v-if="tc.result" :style="{ color: tc.result.data?.is_error ? 'var(--danger)' : 'var(--ok)' }">
                     {{ tc.result.data?.is_error ? '失败' : '成功' }}
@@ -475,6 +505,26 @@ watch(runId, async (v) => {
 .tool-log { max-height: 70vh; overflow-y: auto; }
 .tool-line { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--border-soft); font-size: 12px; }
 .tool-name { min-width: 120px; }
+
+/* External MCP tool (namespaced <server>::<tool>) — highlight the
+   server half so the user can scan for "wait, where's this from?". */
+.ext-tool { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--aurora-bright); }
+.ext-tool .ns { color: var(--text-faint); margin: 0 1px; }
+.ext-tool .ext-tail { color: var(--stellar); }
+.ext-badge {
+  display: inline-block;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: rgba(95, 200, 212, 0.12);
+  color: var(--aurora-bright);
+  border: 1px solid rgba(95, 200, 212, 0.25);
+  vertical-align: middle;
+  text-transform: uppercase;
+}
 .tool-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-status { font-size: 11px; font-weight: 600; }
 

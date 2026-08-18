@@ -63,6 +63,12 @@ const routes = [
     meta: { title: '设置' },
   },
   {
+    path: '/library',
+    name: 'library',
+    component: () => import('./views/LibraryView.vue'),
+    meta: { title: '库' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('./views/NotFoundView.vue'),

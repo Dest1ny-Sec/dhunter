@@ -199,6 +199,28 @@ var migrations = []string{
 		updated_at  INTEGER NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled);`,
+
+	// skills — user-installable agent skills (prompt + metadata). Built-in
+	// skills are seeded into this table on first run; user-defined ones
+	// come from the UI. The agent reads `enabled` rows into its system
+	// prompt or tool instructions.
+	//   source: 'builtin' (seeded) | 'community' (imported) | 'custom' (user-written)
+	//   category: free-form (e.g. 'web', 'api', 'fuzz', 'reporting')
+	`CREATE TABLE IF NOT EXISTS skills (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL UNIQUE,
+		title       TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		content     TEXT NOT NULL DEFAULT '',
+		category    TEXT NOT NULL DEFAULT 'general',
+		tags        TEXT NOT NULL DEFAULT '',
+		enabled     INTEGER NOT NULL DEFAULT 1,
+		source      TEXT NOT NULL DEFAULT 'custom',
+		created_at  INTEGER NOT NULL,
+		updated_at  INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_skills_enabled ON skills(enabled);`,
+	`CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source);`,
 }
 
 // Migrate runs every DDL statement in order, then applies per-column

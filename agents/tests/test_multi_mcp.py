@@ -310,3 +310,143 @@ def test_hub_empty_active_disables_all():
             await backend.stop()
 
     asyncio.run(scenario())
+
+
+def test_sync_info_records_last_reload_and_per_server_status():
+    """sync_info() must report last_reload_at (Unix seconds) and the
+    per-server ready/error breakdown, even on partial failures."""
+    import time as _t
+
+    async def scenario():
+        alpha, _ = _make_mocks()
+        await alpha.start()
+        backend = MockBackend([
+            {"name": "good", "url": alpha.url, "transport": "http", "token": ""},
+            {"name": "bad", "url": "http://127.0.0.1:1/mcp", "transport": "http", "token": ""},
+        ])
+        await backend.start()
+        try:
+            hub = ExternalMCPHub()
+            t0 = _t.time()
+            await hub.load_from_backend(backend_url=backend.url, token="t")
+            t1 = _t.time()
+
+            info = hub.sync_info()
+            assert t0 <= info["last_reload_at"] <= t1
+            # No "no servers connected" error since at least one (good) is up.
+            assert info["last_reload_error"] == ""
+            assert isinstance(info["servers"], list)
+            assert len(info["servers"]) == 2
+            by_name = {s["name"]: s for s in info["servers"]}
+            assert by_name["good"]["status"] == "connected"
+            assert by_name["bad"]["status"] == "error"
+        finally:
+            await alpha.stop()
+            await backend.stop()
+
+    asyncio.run(scenario())
+
+
+def test_sync_info_zero_before_any_reload():
+    hub = ExternalMCPHub()
+    info = hub.sync_info()
+    assert info["last_reload_at"] == 0.0
+    assert info["last_reload_error"] == ""
+    assert info["servers"] == []
+
+
+class _HangingClient:
+    """External MCP client whose call_tool never returns — must be bounded
+    by the hub's CALL_TIMEOUT instead of stalling the tool loop."""
+
+    async def initialize(self):
+        return {}
+
+    async def list_tools(self):
+        return []
+
+    async def call_tool(self, name, arguments=None):
+        await asyncio.Event().wait()  # hang forever
+        return {}
+
+    async def aclose(self):
+        pass
+
+
+def test_hub_call_bounds_hung_external_server(monkeypatch):
+    """A hung external server must surface as an in-band error after the
+    CALL_TIMEOUT, NOT block the worker's tool loop indefinitely."""
+    import core.agent  # noqa: F401  (ensures sys.path for relative imports)
+    from tools.multi_mcp import CALL_TIMEOUT, ExternalMCPHub
+
+    async def scenario():
+        hub = ExternalMCPHub()
+        hub._clients["hung-server"] = _HangingClient()  # noqa: SLF001
+        monkeypatch.setattr("tools.multi_mcp.CALL_TIMEOUT", 0.2)  # 200ms in test
+        t0 = asyncio.get_running_loop().time()
+        result = await hub.call("hung-server::some_tool", {})
+        elapsed = asyncio.get_running_loop().time() - t0
+        assert result.get("is_error") is True, result
+        assert "TimeoutError" in result.get("content", ""), result
+        assert elapsed < 5, f"call did not bound: {elapsed:.2f}s"
+        await hub.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_hub_caps_oversized_tool_lists():
+    """A server advertising more than MAX_TOOLS_PER_SERVER tools must be
+    capped at load time (marked truncated), and all_tools() must never
+    exceed the global cap."""
+    from tools.multi_mcp import MAX_TOOLS_PER_SERVER, MAX_TOTAL_EXTERNAL_TOOLS, ExternalMCPHub
+
+    async def scenario():
+        # 150 tools on one server; 200 on another → global 300 cap kicks in.
+        tools_a = [{"name": f"a_tool_{i}", "description": "x", "inputSchema": {"type": "object"}} for i in range(150)]
+        tools_b = [{"name": f"b_tool_{i}", "description": "y", "inputSchema": {"type": "object"}} for i in range(200)]
+        srv_a = MockMCPServer("big-a", tools_a)
+        srv_b = MockMCPServer("big-b", tools_b)
+        await srv_a.start()
+        await srv_b.start()
+        try:
+            backend = MockBackend([
+                {"name": "big-a", "url": srv_a.url, "transport": "http", "token": "t"},
+                {"name": "big-b", "url": srv_b.url, "transport": "http", "token": "t"},
+            ])
+            await backend.start()
+            try:
+                hub = ExternalMCPHub()
+                status = await hub.load_from_backend(backend.url, "tok")
+                # Per-server cap applied at load.
+                assert status["big-a"]["truncated"] is True, status["big-a"]
+                assert status["big-a"]["raw_tool_count"] == 150, status["big-a"]
+                assert len(status["big-a"]["tools"]) == MAX_TOOLS_PER_SERVER
+                # Per-server cap already limits each to 100 → total 200.
+                all_tools = hub.all_tools()
+                assert len(all_tools) == 2 * MAX_TOOLS_PER_SERVER, len(all_tools)
+                # status() reflects the truncated marker.
+                st = {s["name"]: s for s in hub.status()}
+                assert st["big-a"].get("truncated") is True
+                assert st["big-a"].get("raw_tool_count") == 150
+                assert st["big-b"].get("truncated") is True
+                assert st["big-b"].get("raw_tool_count") == 200
+                await hub.aclose()
+
+                # Global cap: 4 servers × 100 tools → all_tools() stops at
+                # MAX_TOTAL_EXTERNAL_TOOLS (pure state, no HTTP needed).
+                hub2 = ExternalMCPHub()
+                for i in range(4):
+                    hub2._status[f"s{i}"] = {
+                        "status": "connected",
+                        "tools": [{"name": f"t{j}", "description": "x", "inputSchema": {"type": "object"}} for j in range(100)],
+                        "error": "",
+                    }
+                assert len(hub2.all_tools()) == MAX_TOTAL_EXTERNAL_TOOLS, len(hub2.all_tools())
+                await hub2.aclose()
+            finally:
+                await backend.stop()
+        finally:
+            await srv_a.stop()
+            await srv_b.stop()
+
+    asyncio.run(scenario())

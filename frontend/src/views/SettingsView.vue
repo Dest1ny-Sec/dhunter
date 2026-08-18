@@ -4,7 +4,6 @@ import { api } from '../api/client'
 import UiCard from '../components/ui/UiCard.vue'
 import UiBadge from '../components/ui/UiBadge.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import MCPExtensions from '../components/MCPExtensions.vue'
 import { useAuthStore } from '../stores/auth'
 
 const status = ref<any>(null)
@@ -207,11 +206,6 @@ onMounted(load)
         </div>
       </UiCard>
     </div>
-
-    <div class="section-title">扩展中心</div>
-    <UiCard>
-      <MCPExtensions />
-    </UiCard>
 
     <div class="section-title">平台服务</div>
     <UiCard title="平台服务（自动检测）">

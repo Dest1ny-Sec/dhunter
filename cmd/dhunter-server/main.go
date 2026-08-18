@@ -88,6 +88,17 @@ func main() {
 	hub := stream.New()
 	bridge := agent.New(cfg.Agent.PythonURL, cfg.Agent.Token, stores, hub)
 
+	// Seed built-in skills into the Library → Skills tab. Idempotent:
+	// each row is keyed on `name`, so re-seeding an existing row is a
+	// no-op. Failures are non-fatal — a missing skill just means the
+	// user has fewer starter options until the next restart. We use a
+	// fresh context (bootCtx was cancelled right above).
+	seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := handler.SeedBuiltinSkills(seedCtx, stores.Skills); err != nil {
+		log.Printf("seed built-in skills: %v", err)
+	}
+	seedCancel()
+
 	// --- Router (API + SSE + SPA) ----------------------------------
 	router := buildRouter(cfg, stores, hub, bridge, adminUser, passwordHash)
 

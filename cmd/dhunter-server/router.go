@@ -136,6 +136,18 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 		api.DELETE("/mcp-servers/:id", mcpH.Delete)
 		api.POST("/mcp-servers/:id/test", mcpH.Test)
 		api.POST("/mcp-servers/reload", mcpH.Reload)
+		api.GET("/mcp-servers/agent-status", mcpH.AgentStatus)
+
+		// Skills — Library → Skills tab. The built-in set is seeded by
+		// main() before the router is built; the UI lists + toggles +
+		// CRUDs the rows here.
+		skillH := handler.NewSkillHandler(stores)
+		api.GET("/skills", skillH.List)
+		api.GET("/skills/:id", skillH.Get)
+		api.POST("/skills", skillH.Create)
+		api.PUT("/skills/:id", skillH.Update)
+		api.DELETE("/skills/:id", skillH.Delete)
+		api.POST("/skills/:id/toggle", skillH.Toggle)
 
 		api.GET("/status", func(c *gin.Context) {			hc := &http.Client{Timeout: 3 * time.Second}
 			probe := func(url string) string {

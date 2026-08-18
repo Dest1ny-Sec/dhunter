@@ -289,6 +289,16 @@ async def reload_external_mcps(request: Request):
     return {"reloaded": len(status), "connected": connected, "status": status}
 
 
+@app.get("/v1/mcp/status", dependencies=[Depends(require_token)])
+async def external_mcp_status(request: Request):
+    """Agent's view of its external MCP connections. The Settings UI
+    polls this to show the "上次同步 · X 分钟前" indicator and the
+    per-row green/gray dot. Read-only; use /v1/mcp/reload to refresh.
+    """
+    registry = request.app.state.registry
+    return registry.ext.sync_info()
+
+
 # --- Internals ----------------------------------------------------------
 
 

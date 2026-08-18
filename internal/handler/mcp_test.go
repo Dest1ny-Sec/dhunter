@@ -327,10 +327,16 @@ type fakeAgent struct {
 	connected int
 	total     int
 	err       error
+	status    map[string]any
+	statusErr error
 }
 
 func (f *fakeAgent) ReloadMCPs(_ context.Context) (int, int, error) {
 	return f.connected, f.total, f.err
+}
+
+func (f *fakeAgent) MCPStatus(_ context.Context) (map[string]any, error) {
+	return f.status, f.statusErr
 }
 
 func TestMCPHandler_Active_ExposesTokens(t *testing.T) {
@@ -434,6 +440,50 @@ func TestMCPHandler_Reload_Returns503WhenNoAgent(t *testing.T) {
 	}
 }
 
+func TestMCPHandler_AgentStatus_PassesThrough(t *testing.T) {
+	stores, cleanup := newMCPTestEnv(t)
+	defer cleanup()
+	payload := map[string]any{
+		"last_reload_at":     1700000000.0,
+		"last_reload_error":  "",
+		"servers": []any{
+			map[string]any{"name": "nuclei", "status": "connected", "tool_count": 3, "tools": []any{"nuclei_scan"}, "error": ""},
+		},
+	}
+	h := NewMCPHandler(stores, &fakeAgent{status: payload})
+	r := gin.New()
+	r.Use(bypassAuth())
+	h.Register(r.Group(""))
+	w := doJSON(r, "GET", "/mcp-servers/agent-status", nil)
+	if w.Code != 200 {
+		t.Fatalf("agent-status: %d %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["last_reload_at"] == nil {
+		t.Fatalf("missing last_reload_at in %v", resp)
+	}
+	servers, _ := resp["servers"].([]any)
+	if len(servers) != 1 {
+		t.Fatalf("want 1 server, got %d", len(servers))
+	}
+}
+
+func TestMCPHandler_AgentStatus_502OnAgentError(t *testing.T) {
+	stores, cleanup := newMCPTestEnv(t)
+	defer cleanup()
+	h := NewMCPHandler(stores, &fakeAgent{statusErr: fmt.Errorf("connection refused")})
+	r := gin.New()
+	r.Use(bypassAuth())
+	h.Register(r.Group(""))
+	w := doJSON(r, "GET", "/mcp-servers/agent-status", nil)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("agent-status: want 502, got %d", w.Code)
+	}
+}
+
 // --- helpers -----------------------------------------------------------
 
 // Register mounts the handler at the given group root. Keeps the test
@@ -444,6 +494,7 @@ func (h *MCPHandler) Register(g *gin.RouterGroup) {
 	g.POST("/mcp-servers", h.Create)
 	g.GET("/mcp-servers", h.List)
 	g.GET("/mcp-servers/active", h.Active)
+	g.GET("/mcp-servers/agent-status", h.AgentStatus)
 	g.GET("/mcp-servers/:id", h.Get)
 	g.PUT("/mcp-servers/:id", h.Update)
 	g.DELETE("/mcp-servers/:id", h.Delete)
@@ -498,3 +549,58 @@ func namesOf(ms []*store.MCPServer) []string {
 
 // guard against a future helper being unused
 var _ = strings.TrimSpace
+
+func TestClassifyURLPrivate(t *testing.T) {
+	cases := []struct {
+		url  string
+		priv bool
+	}{
+		{"http://localhost:9124/message", true},
+		{"http://127.0.0.1:9999/mcp", true},
+		{"http://10.0.0.5/mcp", true},
+		{"http://192.168.1.1/mcp", true},
+		{"http://169.254.169.254/latest/meta-data", true},
+		{"http://metadata.google.internal/", true},
+		{"http://[::1]:8080/mcp", true},
+		{"http://example.com/mcp", false},
+		{"https://mcp.example.net/", false},
+		{"ftp://x", false}, // not http(s), classify bails
+	}
+	for _, c := range cases {
+		got, note := classifyURLPrivate(c.url)
+		if got != c.priv {
+			t.Errorf("classifyURLPrivate(%q) = %v (note %q), want %v", c.url, got, note, c.priv)
+		}
+	}
+}
+
+func TestMCPHandler_Create_FlagsPrivateURL(t *testing.T) {
+	stores, cleanup := newMCPTestEnv(t)
+	defer cleanup()
+	h := NewMCPHandler(stores, nil)
+	r := gin.New()
+	r.Use(bypassAuth())
+	h.Register(r.Group(""))
+
+	w := doJSON(r, "POST", "/mcp-servers", createMCPReq{Name: "meta", URL: "http://169.254.169.254/mcp", Transport: "http"})
+	if w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var raw map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &raw)
+	if raw["private"] != true {
+		t.Fatalf("private flag not set on metadata URL: %v", raw)
+	}
+	if raw["private_note"] == "" {
+		t.Fatalf("private_note missing: %v", raw)
+	}
+
+	// A public URL is not flagged (fresh map — Unmarshal into an existing
+	// map keeps leftover keys from the previous decode).
+	var rawPub map[string]any
+	w = doJSON(r, "POST", "/mcp-servers", createMCPReq{Name: "pub", URL: "https://mcp.example.com", Transport: "http"})
+	_ = json.Unmarshal(w.Body.Bytes(), &rawPub)
+	if rawPub["private"] == true || rawPub["private_note"] != nil {
+		t.Fatalf("public URL wrongly flagged: %v", rawPub)
+	}
+}
