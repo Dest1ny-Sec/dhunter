@@ -96,6 +96,12 @@ type Vulnerability struct {
 	// Reproduction holds step-by-step repro instructions (curl + expected
 	// result) so a report is actionable without re-deriving the PoC.
 	Reproduction string    `json:"reproduction,omitempty"`
+	// PoCEvidence is the verifier's mechanical-replay record: the literal
+	// curl that was replayed, the response excerpt, and the reproducibility
+	// count (e.g. "3/3 attempts produced the same response"). Empty for
+	// findings created before the field existed or for vulnerabilities that
+	// the verifier auto-dismissed before recording evidence.
+	PoCEvidence string    `json:"poc_evidence,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	// NormTitle is a dedup key (lowercased, trimmed, whitespace-collapsed).
 	// It is computed by the store and never exposed over the API.
@@ -708,6 +714,24 @@ func (s *VulnStore) UpdateSeverity(ctx context.Context, id, severity string) err
 	return nil
 }
 
+// UpdatePoCEvidence stores the verifier's mechanical-replay record. Empty
+// evidence is a no-op so callers can call this unconditionally without
+// trampling a previously-recorded replay.
+func (s *VulnStore) UpdatePoCEvidence(ctx context.Context, id, evidence string) error {
+	if evidence == "" {
+		return nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE vulnerabilities SET poc_evidence = ? WHERE id = ?`, evidence, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // FindDuplicate returns the ID of an existing vuln in the same run with
 // the same (normalized) title + target, or "" when none exists.
 func (s *VulnStore) FindDuplicate(ctx context.Context, runID, title, target string) (string, error) {
@@ -798,7 +822,7 @@ func (s *VulnStore) CreateIfAbsent(ctx context.Context, v *Vulnerability) (creat
 // Get fetches a vulnerability by ID.
 func (s *VulnStore) Get(ctx context.Context, id string) (*Vulnerability, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at
+		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, poc_evidence, created_at
 		 FROM vulnerabilities WHERE id = ?`, id)
 	return scanVuln(row)
 }
@@ -806,13 +830,13 @@ func (s *VulnStore) Get(ctx context.Context, id string) (*Vulnerability, error) 
 // ListByRun returns vulnerabilities for a run.
 func (s *VulnStore) ListByRun(ctx context.Context, runID string) ([]*Vulnerability, error) {
 	return s.query(ctx,
-		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at
+		`SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, poc_evidence, created_at
 		 FROM vulnerabilities WHERE run_id = ? ORDER BY created_at ASC`, runID)
 }
 
 // ListAll returns every vulnerability, optionally filtered.
 func (s *VulnStore) ListAll(ctx context.Context, runID, targetID, severity string) ([]*Vulnerability, error) {
-	q := `SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, created_at
+	q := `SELECT id, run_id, target_id, title, severity, status, target, evidence, impact, recommendation, reproduction, poc_evidence, created_at
 	      FROM vulnerabilities WHERE 1=1`
 	args := []any{}
 	if runID != "" {
@@ -852,7 +876,8 @@ func scanVuln(r rowScanner) (*Vulnerability, error) {
 	var v Vulnerability
 	var createdMs int64
 	if err := r.Scan(&v.ID, &v.RunID, &v.TargetID, &v.Title, &v.Severity, &v.Status,
-		&v.Target, &v.Evidence, &v.Impact, &v.Recommendation, &v.Reproduction, &createdMs); err != nil {
+		&v.Target, &v.Evidence, &v.Impact, &v.Recommendation, &v.Reproduction,
+		&v.PoCEvidence, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

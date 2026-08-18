@@ -17,6 +17,7 @@ Disabled entirely with DHUNTER_VERIFY=0.
 from __future__ import annotations
 
 import asyncio
+import json as json_lib
 import logging
 import os
 import re
@@ -168,13 +169,26 @@ async def run_verifier(run: AgentRun, board: BoardClient, system_prompt: str, ll
     for v in pending:
         # system_prompt is intentionally NOT forwarded: the verifier uses
         # the small fixed VERIFIER_SYSTEM (rules live in the user message).
-        verdict, reason, severity = await _judge(run, v, llm_config=llm_config, auth_context=auth_context)
+        verdict, reason, severity, replay = await _judge(run, v, llm_config=llm_config, auth_context=auth_context)
         try:
             if verdict:
                 # Also correct inflated severities from the LLM.
                 final_sev = _cap_severity(v.get("severity") or "medium", v.get("title") or "", severity)
                 await board.set_vuln_severity(v["id"], final_sev)
                 await board.set_vuln_status(v["id"], "confirmed")
+                # Attach the machine-verified PoC record so the report
+                # surfaces a strix-shaped "X/Y reproduced, here's the curl"
+                # block instead of just the LLM's prose evidence. We only
+                # attach when the replay was stable and produced a
+                # reproducible signal — otherwise the LLM's text stands
+                # alone and we don't fake a PoC.
+                if replay and replay.get("ok") and replay.get("stable"):
+                    poc_md = render_poc_evidence(replay)
+                    if poc_md:
+                        try:
+                            await board.set_vuln_poc_evidence(v["id"], poc_md)
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("verifier: failed to write poc_evidence for %s: %s", v.get("id"), e)
                 confirmed += 1
             else:
                 await board.set_vuln_status(v["id"], "dismissed")
@@ -370,7 +384,7 @@ async def _replay(v: dict[str, Any], auth_context: dict[str, Any] | None = None)
                     await asyncio.sleep(_REPLAY_INTERVAL)
                 if len(set(hits)) > 1:
                     stable = False
-                outcomes.append({"method": r["method"], "url": r["url"], "hits": hits})
+                outcomes.append({"method": r["method"], "url": r["url"], "hits": hits, "body": r["body"]})
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
@@ -385,9 +399,72 @@ async def _replay(v: dict[str, Any], auth_context: dict[str, Any] | None = None)
     }
 
 
+# Response body excerpt length for the PoC block. Short enough to keep the
+# report scannable, long enough that the reader can see what came back.
+_POC_BODY_EXCERPT_CHARS = 240
+
+
+def render_poc_evidence(replay: dict[str, Any]) -> str:
+    """Build a Markdown "PoC 验证证据" block from a replay result.
+
+    The block is the single source of truth the report renderer uses to show
+    that a finding is real and reproducible — same shape regardless of whether
+    the curl came from the worker's `reproduction` or was synthesized by the
+    verifier. Strix-shaped: method / URL / payload / status / reproducibility
+    count / response excerpt / curl one-liner.
+    """
+    if not replay.get("ok") or not replay.get("requests"):
+        return ""
+    reqs = replay["requests"]
+    first = reqs[0]
+    method = first.get("method") or "GET"
+    url = first.get("url") or ""
+    status = first.get("hits", [[None, ""]])[0][0]
+    body = first.get("hits", [[None, ""]])[0][1] or ""
+    body_excerpt = (body[:_POC_BODY_EXCERPT_CHARS] + "…") if len(body) > _POC_BODY_EXCERPT_CHARS else body
+    # Reproducibility: same response across all 3 passes?
+    pass_count = _REPLAY_PASSES
+    all_statuses = [h[0] for h in first.get("hits", [])]
+    distinct_statuses = len(set(all_statuses))
+    reproducible = (distinct_statuses == 1)
+
+    payload = first.get("body") or ""
+    payload_line = ""
+    if payload:
+        # Trim and present as a literal code span; full payload still in
+        # the curl one-liner below.
+        short = payload.strip().replace("\n", " ")
+        if len(short) > 200:
+            short = short[:200] + "…"
+        payload_line = f"- **Payload**: `{short}`\n"
+
+    curl_body = ""
+    if payload:
+        # Body must be passed with --data-raw (preserves special chars);
+        # method/URL is a straight interpolation that the reader can copy.
+        curl_body = f" --data-raw {json_lib.dumps(payload)}"
+    curl = f"curl -X {method} {url}{curl_body}"
+
+    lines = [
+        f"- **方法 / URL**: `{method} {url}`",
+        payload_line.rstrip(),
+        f"- **状态**: `{status}`",
+        f"- **复现**: {pass_count}/{pass_count} {'✓' if reproducible else '✗ 不稳定'} (响应一致: {'是' if reproducible else '否, 共 ' + str(distinct_statuses) + ' 种不同状态'})",
+    ]
+    if body_excerpt:
+        lines.append(f"- **响应片段**:\n\n```\n{body_excerpt}\n```")
+    lines.append(f"\n**curl 复现**:\n\n```bash\n{curl}\n```")
+    return "\n".join(lines)
+
+
 async def _judge(run: AgentRun, v: dict[str, Any], llm_config: dict[str, Any] | None = None,
-                 auth_context: dict[str, Any] | None = None) -> tuple[bool, str, str]:
-    """Returns (confirmed, reason, llm_severity).
+                 auth_context: dict[str, Any] | None = None) -> tuple[bool, str, str, dict[str, Any] | None]:
+    """Returns (confirmed, reason, llm_severity, replay_result).
+
+    `replay_result` is the dict the verifier just produced mechanically; the
+    caller uses it to write a PoC evidence block onto confirmed findings so
+    the report can show method/URL/payload/status/reproducibility instead of
+    only the LLM's prose.
 
     Uses the small fixed VERIFIER_SYSTEM instead of the worker's system
     prompt — the judging rules live in the user message, so forwarding the
@@ -401,19 +478,19 @@ async def _judge(run: AgentRun, v: dict[str, Any], llm_config: dict[str, Any] | 
     is_noise = any(h in low for h in _REJECT_HINTS)
     has_exploit = _has_exploit_marker(title, evidence)
     if is_noise and not has_exploit:
-        return False, "config noise / phenomenon, no demonstrated exploit", "low"
+        return False, "config noise / phenomenon, no demonstrated exploit", "low", None
 
     # Mechanical replay: re-run the finding's own PoC requests and check the
     # oracle is stable. The judge must not trust the worker's text alone — a
     # differential that flips between two identical requests is noise.
     replay = await _replay(v, auth_context)
     if not replay.get("ok"):
-        return False, f"机械重放失败: {replay.get('error', '')}", "info"
+        return False, f"机械重放失败: {replay.get('error', '')}", "info", replay
     if replay.get("stable") is False:
         if _is_oracle_finding(title, evidence):
             # An oracle finding whose signal does not reproduce is dead on
             # arrival — dismiss without spending an LLM judgment call.
-            return False, "机械重放不稳定: 同一请求多次结果不一致, finding 依赖的 oracle 不可复现, 已自动驳回", "info"
+            return False, "机械重放不稳定: 同一请求多次结果不一致, finding 依赖的 oracle 不可复现, 已自动驳回", "info", replay
         replay_note = _unstable_replay_note(replay)
     else:
         replay_note = _stable_replay_note(replay)
@@ -429,14 +506,14 @@ async def _judge(run: AgentRun, v: dict[str, Any], llm_config: dict[str, Any] | 
         text = await call_llm_text(run, system=VERIFIER_SYSTEM, user_content=user_content, llm_config=llm_config)
     except Exception as e:  # noqa: BLE001
         log.warning("verifier: judge call failed for %s: %s", v.get("id"), e)
-        return False, "verifier LLM call failed", "info"
+        return False, "verifier LLM call failed", "info", replay
     parsed = parse_json_object(text)
     confirm = parsed.get("confirm") in (True, "true", "True")
     reason = str(parsed.get("reason") or "")
     severity = str(parsed.get("severity") or "").lower()
     if severity not in ("critical", "high", "medium", "low", "info"):
         severity = ""
-    return confirm, reason, severity
+    return confirm, reason, severity, replay
 
 
 def _cap_severity(reported: str, title: str, llm_sev: str) -> str:

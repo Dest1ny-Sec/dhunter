@@ -181,3 +181,13 @@ class BoardClient:
         resp = await self._request("PATCH", f"/api/vulnerabilities/{vuln_id}", json={"severity": severity})
         if resp.status_code >= 400:
             raise BoardError(f"set_vuln_severity http {resp.status_code}: {resp.text[:300]}")
+
+    async def set_vuln_poc_evidence(self, vuln_id: str, evidence: str) -> None:
+        """Attach verifier's mechanical-replay record (curl + response excerpt +
+        reproducibility count). The report renderer surfaces this as a "PoC 验证"
+        block. Empty evidence is silently ignored server-side."""
+        if not evidence:
+            return
+        resp = await self._request("PATCH", f"/api/vulnerabilities/{vuln_id}", json={"poc_evidence": evidence})
+        if resp.status_code >= 400:
+            raise BoardError(f"set_vuln_poc_evidence http {resp.status_code}: {resp.text[:300]}")

@@ -280,3 +280,71 @@ def test_replay_ignores_other_host_cookies():
     r = _with_auth({"method": "GET", "url": "https://b.example.com/x", "headers": {}, "body": None},
                    headers, host)
     assert "Cookie" not in r["headers"]
+
+
+# --- render_poc_evidence -------------------------------------------------
+#
+# The verifier writes a strix-shaped "X/Y reproduced, here's the curl" block
+# onto every confirmed finding. The report renderer surfaces it; these tests
+# lock the exact shape so a copy-paste-the-curl reader gets a working line.
+
+def test_render_poc_evidence_shape():
+    from core.verifier import render_poc_evidence
+    replay = {
+        "ok": True,
+        "method": "POST",
+        "url": "https://target.example.com/api/users",
+        "stable": True,
+        "requests": [{
+            "method": "POST",
+            "url": "https://target.example.com/api/users",
+            "body": 'id=1\' OR \'1\'=\'1\' --',
+            "hits": [
+                (200, '{"users": [...50,000 records...]}'),
+                (200, '{"users": [...50,000 records...]}'),
+                (200, '{"users": [...50,000 records...]}'),
+            ],
+        }],
+    }
+    md = render_poc_evidence(replay)
+    assert md, "render_poc_evidence returned empty for valid replay"
+    # The strix-shaped checklist items the report reader needs.
+    assert "**PoC 验证**" not in md  # the renderer adds that header; the function is the body
+    assert "**方法 / URL**" in md
+    assert "POST" in md and "https://target.example.com/api/users" in md
+    assert "**Payload**" in md
+    assert "**复现**" in md
+    assert "3/" in md  # 3 of 3 reproduced
+    assert "✓" in md
+    assert "**响应片段**" in md
+    # Curl one-liner the reader can copy straight into a terminal.
+    assert "```bash" in md
+    assert "curl -X POST https://target.example.com/api/users" in md
+    # Body must be passed with --data-raw (preserves special chars like quotes).
+    assert "--data-raw" in md
+
+
+def test_render_poc_evidence_unstable_replay_flags_unstable():
+    from core.verifier import render_poc_evidence
+    # Stable=False replay: function should still emit a block, but mark
+    # the reproducibility as unstable so the report is honest about it.
+    replay = {
+        "ok": True,
+        "method": "GET",
+        "url": "https://t.example.com/x",
+        "stable": False,
+        "requests": [{
+            "method": "GET",
+            "url": "https://t.example.com/x",
+            "body": None,
+            "hits": [(200, "v1"), (500, "err"), (200, "v1")],
+        }],
+    }
+    md = render_poc_evidence(replay)
+    assert "✗" in md or "不稳定" in md
+
+
+def test_render_poc_evidence_empty_for_failed_replay():
+    from core.verifier import render_poc_evidence
+    assert render_poc_evidence({"ok": False, "error": "no url"}) == ""
+    assert render_poc_evidence({"ok": True, "requests": []}) == ""

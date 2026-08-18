@@ -201,6 +201,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"runs", "reasoning_tokens INTEGER NOT NULL DEFAULT 0"},
 		{"vulnerabilities", "norm_title TEXT NOT NULL DEFAULT ''"},
 		{"vulnerabilities", "reproduction TEXT NOT NULL DEFAULT ''"},
+		{"vulnerabilities", "poc_evidence TEXT NOT NULL DEFAULT ''"},
 		{"targets", "auth_context TEXT NOT NULL DEFAULT ''"},
 		{"targets", "red_lines TEXT NOT NULL DEFAULT ''"},
 		{"targets", "name TEXT NOT NULL DEFAULT ''"},

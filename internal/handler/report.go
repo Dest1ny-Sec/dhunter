@@ -152,6 +152,9 @@ func (h *ReportHandler) ProjectReport(c *gin.Context) {
 					if v.Reproduction != "" {
 						fmt.Fprintf(&b, "- **复现步骤**:\n\n```\n%s\n```\n", v.Reproduction)
 					}
+					if v.PoCEvidence != "" {
+						fmt.Fprintf(&b, "\n**PoC 验证**:\n\n%s\n", v.PoCEvidence)
+					}
 					fmt.Fprintf(&b, "\n")
 				}
 			}
@@ -232,6 +235,13 @@ func (h *ReportHandler) buildMarkdown(c *gin.Context, runID string) (string, err
 			fmt.Fprintf(&b, "#### %d. [%s] %s\n\n", i+1, strings.ToUpper(v.Severity), v.Title)
 			if v.Target != "" {
 				fmt.Fprintf(&b, "- **影响目标**: %s\n", v.Target)
+			}
+			// PoC block sits BEFORE the LLM's prose evidence so the
+			// machine-verified reproduction is the first thing the
+			// reader sees — same shape as a strix / Burp / professional
+			// pentest report.
+			if v.PoCEvidence != "" {
+				fmt.Fprintf(&b, "\n**PoC 验证**:\n\n%s\n", v.PoCEvidence)
 			}
 			if v.Evidence != "" {
 				fmt.Fprintf(&b, "- **证据**:\n\n```\n%s\n```\n", v.Evidence)

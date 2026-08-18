@@ -144,12 +144,14 @@ var validVulnSeverities = map[string]struct{}{
 }
 
 // Patch handles PATCH /api/vulnerabilities/:id — the verifier flips the
-// lifecycle status (pending -> confirmed/dismissed) and may correct the
-// severity (SRC calibration).
+// lifecycle status (pending -> confirmed/dismissed), may correct the
+// severity (SRC calibration), and may attach PoC evidence (mechanical-replay
+// record from the verifier's HTTP reproduction).
 func (h *VulnsHandler) Patch(c *gin.Context) {
 	var body struct {
-		Status   string `json:"status"`
-		Severity string `json:"severity"`
+		Status      string `json:"status"`
+		Severity    string `json:"severity"`
+		PoCEvidence string `json:"poc_evidence"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
@@ -157,6 +159,7 @@ func (h *VulnsHandler) Patch(c *gin.Context) {
 	}
 	body.Status = strings.ToLower(strings.TrimSpace(body.Status))
 	body.Severity = strings.ToLower(strings.TrimSpace(body.Severity))
+	body.PoCEvidence = strings.TrimSpace(body.PoCEvidence)
 
 	if body.Status != "" {
 		if _, ok := validVulnStatuses[body.Status]; !ok {
@@ -178,6 +181,16 @@ func (h *VulnsHandler) Patch(c *gin.Context) {
 			return
 		}
 		if err := h.Stores.Vulns.UpdateSeverity(c.Request.Context(), c.Param("id"), body.Severity); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if body.PoCEvidence != "" {
+		if err := h.Stores.Vulns.UpdatePoCEvidence(c.Request.Context(), c.Param("id"), body.PoCEvidence); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability not found"})
 				return

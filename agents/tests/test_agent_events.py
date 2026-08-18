@@ -177,3 +177,52 @@ def test_cancelled_worker_releases_intent(monkeypatch):
                 task.cancel()
 
     asyncio.run(scenario())
+
+
+# --- _is_no_new_info (ReAct heuristic) ----------------------------------
+#
+# When >= 2 tool calls in a row return "no new info", the worker injects a
+# reflection nudge to pivot. The classifier must:
+#   - flag errors and empty/very-short output
+#   - flag well-known "no results" patterns in EN + ZH
+#   - NOT flag genuine findings (e.g. a list of subdomains, a vulnerability
+#     with a working payload) — false positives here cost the worker
+#     real time on every iteration
+
+def test_is_no_new_info_flags_errors_and_empty():
+    from core.agent import _is_no_new_info
+    assert _is_no_new_info({}) is True
+    assert _is_no_new_info({"is_error": True, "content": "anything"}) is True
+    assert _is_no_new_info({"content": ""}) is True
+    assert _is_no_new_info({"content": "   "}) is True
+
+
+def test_is_no_new_info_flags_known_empty_patterns():
+    from core.agent import _is_no_new_info
+    cases = [
+        "No results found.",
+        "0 subdomains enumerated",
+        "[]",
+        "{}",
+        "未发现任何子域",
+        "无结果",
+        "0 条记录",
+        "Empty result",
+        '"hosts": []',
+    ]
+    for content in cases:
+        assert _is_no_new_info({"content": content}), f"should flag: {content!r}"
+
+
+def test_is_no_new_info_keeps_real_findings():
+    from core.agent import _is_no_new_info
+    # Genuine results with substance — must NOT be flagged.
+    real = [
+        "subdomain: admin.example.com\nsubdomain: api.example.com\nsubdomain: dev.example.com",
+        '{"users": [{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}]}',
+        "HTTP/1.1 200 OK\nServer: nginx/1.18.0\nContent-Type: text/html",
+        "Critical: SQL injection at /api/users. Payload: ' OR 1=1 --",
+        "Found 3 endpoints, 2 with interesting headers",
+    ]
+    for content in real:
+        assert not _is_no_new_info({"content": content}), f"should NOT flag: {content!r}"

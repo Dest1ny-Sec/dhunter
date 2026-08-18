@@ -98,6 +98,50 @@ class AgentRun:
 # --- LLM + tool loop -----------------------------------------------------
 
 
+# Heuristics for "this tool call didn't surface new information" — used by
+# the ReAct reflection nudge below to break the worker out of dead-end
+# hypotheses before the full max_iterations budget is spent.
+_NO_INFO_SIGNALS = (
+    # English
+    "no results", "not found", "0 subdomains", "0 hosts", "0 endpoints",
+    "0 vulnerabilities", "0 records", "no vulnerabilities found",
+    "no such host", "no such record", "no assets", "empty result",
+    "[]", "{}", '""',
+    # Chinese
+    "未发现", "未找到", "无结果", "0 个", "0 条", "空结果", "暂无",
+)
+
+
+def _is_no_new_info(result: dict[str, Any]) -> bool:
+    """True when a tool call returned an error, empty output, or a result
+    that matches the well-known "nothing here" patterns. Used to detect when
+    a worker is hammering a hypothesis that isn't paying off."""
+    if not isinstance(result, dict):
+        return True
+    if result.get("is_error"):
+        return True
+    content = (result.get("content") or "").strip()
+    if not content:
+        return True
+    lower = content.lower()
+    # Cheap substring check — false positives are tolerable because the
+    # reflection prompt is a nudge, not a forced break.
+    return any(sig in lower for sig in _NO_INFO_SIGNALS)
+
+
+# Injected as a tool_result text block when >= 2 tools in a row return no
+# new info. Tells the LLM the worker is stuck and asks it to pivot before
+# the next iteration. Skips the LLM call that a true ReAct "reflect" would
+# cost — the next LLM call sees this in messages and decides for itself.
+_REACT_REFLECTION_TEXT = (
+    "[ReAct] 最近 ≥2 个工具调用都没产生新信息。当前假设/路径/参数可能"
+    "不正确 — 在下一轮工具调用前, 主动换一个角度:\n"
+    "  1) 换攻击面 (不同子域 / 路径 / 参数 / 认证态)\n"
+    "  2) 换工具类型 (e.g. 从 fingerprint 换到 active probe / fuzz)\n"
+    "  3) 如果再 2 轮仍无进展, 收尾总结已确认的事实, 把后续交给 reasoner"
+)
+
+
 def _summarize_turn(assistant: dict[str, Any], tool_user: dict[str, Any]) -> str:
     """One compact line per tool call in a dropped turn:
     `· tool_name(args) → ok|error`. Pairs tool_use blocks (assistant
@@ -261,6 +305,7 @@ async def run_tool_loop(
             break
 
         tool_result_blocks: list[dict[str, Any]] = []
+        no_info_count = 0  # tools in this iteration that returned "no new info"
         for tu in tool_uses:
             name = tu["name"]
             args = tu["input"] or {}
@@ -284,6 +329,25 @@ async def run_tool_loop(
                 "call_id": call_id,
             })
             tool_result_blocks.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content_str, "is_error": bool(result.get("is_error"))})
+            if _is_no_new_info(result):
+                no_info_count += 1
+
+        # ReAct reflection: when ≥2 tools in this iteration all returned no
+        # new info, the worker is hammering a hypothesis that isn't paying
+        # off. Inject a nudge as a text block on the user message so the
+        # next LLM call (next iteration) sees it and pivots. The frontend
+        # also gets a `react_reflection` event so the UI can show a
+        # "[ReAct] pivoting" hint inline.
+        if no_info_count >= 2 and len(tool_uses) >= 2:
+            tool_result_blocks.append({"type": "text", "text": _REACT_REFLECTION_TEXT})
+            try:
+                await run.emit("react_reflection", {
+                    "iteration": iteration,
+                    "no_info_count": no_info_count,
+                    "total_tools": len(tool_uses),
+                })
+            except Exception:  # noqa: BLE001
+                log.warning("failed to emit react_reflection event", exc_info=True)
 
         messages.append({"role": "user", "content": tool_result_blocks})
         # Sliding window: keep the context bounded on long runs (see the
