@@ -131,6 +131,10 @@ func writeFinding(ctx context.Context, args map[string]interface{}) toolResult {
 	if runID == "" {
 		return errResult("write_finding: `run_id` required (the current run's id)")
 	}
+	reproduction := argString(args, "reproduction", "")
+	if reproduction == "" {
+		return errResult("write_finding: `reproduction` required — ordered steps (numbered curl + expected result) the verifier re-plays. Without it the finding will be rejected as noise.")
+	}
 	platformURL := strings.TrimRight(argString(args, "platform_url", firstEnv("DHUNTER_PLATFORM_URL", "DHUNTER_BACKEND_URL")), "/")
 	token := argString(args, "platform_token", firstEnv("DHUNTER_PLATFORM_TOKEN", "DHUNTER_BACKEND_TOKEN"))
 	if platformURL == "" {
@@ -138,12 +142,13 @@ func writeFinding(ctx context.Context, args map[string]interface{}) toolResult {
 	}
 
 	payload := map[string]interface{}{
-		"run_id":   runID,
-		"title":    title,
-		"severity": argString(args, "severity", "medium"),
-		"target":   argString(args, "target", ""),
-		"evidence": argString(args, "evidence", ""),
-		"status":   "pending", // the verifier promotes pending -> confirmed
+		"run_id":       runID,
+		"title":        title,
+		"severity":     argString(args, "severity", "medium"),
+		"target":       argString(args, "target", ""),
+		"evidence":     argString(args, "evidence", ""),
+		"reproduction": reproduction,
+		"status":       "pending", // the verifier promotes pending -> confirmed
 	}
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequestWithContext(ctx, "POST", platformURL+"/api/vulnerabilities", bytes.NewReader(body))

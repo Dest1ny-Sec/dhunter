@@ -104,8 +104,11 @@ class BoardClient:
         except Exception:  # noqa: BLE001
             return {}
 
-    async def create_fact(self, run_id: str, description: str, source: str = "agent") -> str:
-        resp = await self._request("POST", f"/api/runs/{run_id}/facts", json={"description": description, "source": source})
+    async def create_fact(self, run_id: str, description: str, source: str = "agent",
+                          kind: str = "info", confidence: float = 0.5) -> str:
+        resp = await self._request("POST", f"/api/runs/{run_id}/facts", json={
+            "description": description, "source": source, "kind": kind, "confidence": confidence,
+        })
         if resp.status_code >= 400:
             raise BoardError(f"create_fact http {resp.status_code}: {resp.text[:300]}")
         return resp.json().get("id", "")
@@ -134,6 +137,22 @@ class BoardClient:
 
     async def create_hint(self, run_id: str, content: str, creator: str = "agent") -> None:
         await self._request("POST", f"/api/runs/{run_id}/hints", json={"content": content, "creator": creator})
+
+    async def add_asset(self, target_id: str, value: str, type_: str = "endpoint",
+                        meta: str = "", parent_id: str = "", run_id: str = "") -> None:
+        """Record a structured asset (subdomain/endpoint/service/...) on a
+        target. Dedup is handled by the backend (same value → 409)."""
+        await self._request("POST", f"/api/targets/{target_id}/assets", json={
+            "value": value, "type": type_, "meta": meta, "parent_id": parent_id, "run_id": run_id,
+        })
+
+    async def list_assets(self, target_id: str) -> list[dict[str, Any]]:
+        """Fetch the target's asset inventory."""
+        resp = await self._request("GET", f"/api/targets/{target_id}/assets")
+        if resp.status_code >= 400:
+            raise BoardError(f"list_assets http {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        return data.get("assets") or []
 
     async def create_vulnerability(self, payload: dict[str, Any]) -> None:
         """Direct vulnerability write (used by the write_finding tool and

@@ -48,13 +48,15 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [tRes, rRes, vRes] = await Promise.all([
+    const [tRes, rRes, vRes, aRes] = await Promise.all([
       api.get(`/targets/${targetId.value}`),
       api.get(`/targets/${targetId.value}/runs`),
       api.get(`/vulnerabilities?target_id=${targetId.value}`),
+      api.get(`/targets/${targetId.value}/assets`),
     ])
     target.value = tRes.data
     runs.value = rRes.data?.runs || rRes.data || []
+    assets.value = aRes.data?.assets || []
     const vs = vRes.data?.vulnerabilities || vRes.data || []
     const m: Record<string, number> = {}
     for (const v of vs) if (v.status === 'confirmed') m[v.run_id] = (m[v.run_id] || 0) + 1
@@ -62,6 +64,19 @@ async function load() {
   } catch (e: any) {
     error.value = e?.response?.data?.error || e?.message || '加载失败'
   } finally { loading.value = false }
+}
+
+// 资产清单（结构化发现：子域/端点/服务...），树优先展示。
+const assets = ref<any[]>([])
+const assetTypeLabel: Record<string, string> = {
+  'root-domain': '根域', subdomain: '子域', ip: 'IP', service: '服务', app: '应用', endpoint: '端点',
+}
+function assetDepth(a: any, depth = 0, seen = new Set()): number {
+  if (!a.parent_id || seen.has(a.id)) return depth
+  const p = assets.value.find((x) => x.id === a.parent_id)
+  if (!p) return depth
+  seen.add(a.id)
+  return assetDepth(p, depth + 1, seen)
 }
 
 function startNewRun() {
@@ -203,6 +218,22 @@ onMounted(load)
       </div>
     </div>
     <UiEmpty v-else-if="!loading" icon="◇" message="该项目还没有评估记录，点击右上角发起一次" />
+
+    <!-- 资产清单：agent 结构化发现（子域/端点/服务），parent 缩进成树 -->
+    <div v-if="assets.length" class="card" style="margin-top: 14px">
+      <div class="row" style="margin-bottom: 8px">
+        <h3 style="font-size: 14px; font-weight: 600; margin: 0">资产清单（{{ assets.length }}）</h3>
+        <span class="spacer" />
+        <span class="muted" style="font-size: 11px">agent 侦察过程中自动沉淀，跨运行累积</span>
+      </div>
+      <div class="asset-list">
+        <div v-for="a in assets" :key="a.id" class="asset-row" :style="{ paddingLeft: (assetDepth(a) * 18 + 4) + 'px' }">
+          <span class="pill" style="font-size: 10px">{{ assetTypeLabel[a.type] || a.type }}</span>
+          <code style="font-size: 12px; word-break: break-all">{{ a.value }}</code>
+          <span v-if="a.meta" class="muted" style="font-size: 11px; margin-left: 8px">{{ a.meta }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -231,4 +262,7 @@ onMounted(load)
 .cmp-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
 .cmp-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .cmp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-list { display: flex; flex-direction: column; }
+.asset-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.asset-row:last-child { border-bottom: none; }
 </style>

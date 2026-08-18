@@ -72,6 +72,11 @@ func (h *ReportHandler) ProjectReport(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	assets, err := h.Stores.Assets.ListByTarget(ctx, id, 1000)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	var b strings.Builder
 	name := target.Name
@@ -80,9 +85,23 @@ func (h *ReportHandler) ProjectReport(c *gin.Context) {
 	}
 	fmt.Fprintf(&b, "# 项目漏洞报告 — %s\n\n", name)
 	fmt.Fprintf(&b, "- **目标**: %s (`%s`)\n", target.Value, target.Type)
+	if target.Authorization != "" {
+		fmt.Fprintf(&b, "- **授权说明**: %s\n", target.Authorization)
+	}
 	fmt.Fprintf(&b, "- **运行次数**: %d\n", len(runs))
 	fmt.Fprintf(&b, "- **漏洞总数**: %d\n", len(vulns))
 	fmt.Fprintf(&b, "- **导出时间**: %s\n\n", time.Now().UTC().Format(time.RFC3339))
+
+	// Asset inventory (structured discoveries: subdomains/endpoints/services).
+	fmt.Fprintf(&b, "\n## 资产清单 (%d)\n\n", len(assets))
+	if len(assets) == 0 {
+		fmt.Fprintf(&b, "_暂无资产记录。_\n")
+	} else {
+		fmt.Fprintf(&b, "| 类型 | 资产 | 备注 |\n|---|---|---|\n")
+		for _, a := range assets {
+			fmt.Fprintf(&b, "| %s | `%s` | %s |\n", a.Type, a.Value, oneLine(a.Meta))
+		}
+	}
 
 	// Status summary.
 	byStatus := map[string]int{}
@@ -182,6 +201,10 @@ func (h *ReportHandler) buildMarkdown(c *gin.Context, runID string) (string, err
 	}
 	if run.Objective != "" {
 		fmt.Fprintf(&b, "- **目标说明**: %s\n", run.Objective)
+	}
+	// Declarative authorization audit note (surfaced for compliance).
+	if target.Authorization != "" {
+		fmt.Fprintf(&b, "- **授权说明**: %s\n", target.Authorization)
 	}
 	if run.Summary != "" {
 		fmt.Fprintf(&b, "\n## 摘要\n\n%s\n", run.Summary)

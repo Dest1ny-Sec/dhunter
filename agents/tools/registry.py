@@ -189,6 +189,15 @@ async def _write_fact(args: dict[str, Any], current_run_id: str = "") -> dict[st
     if not run_id:
         return {"content": "write_fact: no run_id available", "is_error": True}
 
+    # kind: port/service/vuln/finding/http/info (default info).
+    # confidence: 0..1 — how certain this evidence is (default 0.5).
+    kind = str(args.get("kind") or "info").strip().lower() or "info"
+    try:
+        confidence = float(args.get("confidence") if args.get("confidence") not in (None, "") else 0.5)
+    except (TypeError, ValueError):
+        confidence = 0.5
+    confidence = min(max(confidence, 0.0), 1.0)
+
     url = _backend_url() + f"/api/runs/{run_id}/facts"
     headers = {"Content-Type": "application/json"}
     backend_token = os.environ.get("DHUNTER_BACKEND_TOKEN", "").strip()
@@ -196,7 +205,9 @@ async def _write_fact(args: dict[str, Any], current_run_id: str = "") -> dict[st
         headers["Authorization"] = f"Bearer {backend_token}"
     try:
         async with httpx.AsyncClient(trust_env=False, timeout=15.0) as client:
-            resp = await client.post(url, json={"description": description, "source": "agent"}, headers=headers)
+            resp = await client.post(url, json={
+                "description": description, "source": "agent", "kind": kind, "confidence": confidence,
+            }, headers=headers)
         if resp.status_code >= 400:
             return {"content": f"write_fact: backend rejected HTTP {resp.status_code} {resp.text[:300]}", "is_error": True}
         return {"content": f"write_fact: recorded (HTTP {resp.status_code})", "is_error": False}
@@ -205,10 +216,49 @@ async def _write_fact(args: dict[str, Any], current_run_id: str = "") -> dict[st
         return {"content": f"write_fact: backend unreachable ({type(e).__name__}: {e})", "is_error": True}
 
 
+async def _write_asset(args: dict[str, Any], current_run_id: str = "") -> dict[str, Any]:
+    """Record a structured asset on the project (target): a subdomain, IP,
+    service, app or endpoint the agent discovered. Assets form the durable
+    inventory shown in the asset view / reports — distinct from facts (board
+    stepping stones). Requires the target_id (available via the graph)."""
+    value = str(args.get("value") or "").strip()
+    if not value:
+        return {"content": "write_asset: `value` is required (the discovered asset, e.g. api.example.com)", "is_error": True}
+    target_id = str(args.get("target_id") or "").strip()
+    if not target_id:
+        return {"content": "write_asset: `target_id` is required (read it from the run's target)", "is_error": True}
+    a_type = str(args.get("type") or "endpoint").strip().lower()
+    if a_type not in ("root-domain", "subdomain", "ip", "service", "app", "endpoint"):
+        a_type = "endpoint"
+    meta = str(args.get("meta") or "").strip()
+    parent_id = str(args.get("parent_id") or "").strip()
+
+    url = _backend_url() + f"/api/targets/{target_id}/assets"
+    headers = {"Content-Type": "application/json"}
+    backend_token = os.environ.get("DHUNTER_BACKEND_TOKEN", "").strip()
+    if backend_token:
+        headers["Authorization"] = f"Bearer {backend_token}"
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=15.0) as client:
+            resp = await client.post(url, json={
+                "value": value, "type": a_type, "meta": meta, "parent_id": parent_id,
+                "run_id": args.get("run_id") or current_run_id,
+            }, headers=headers)
+        if resp.status_code == 409:
+            return {"content": "write_asset: already recorded (duplicate)", "is_error": False}
+        if resp.status_code >= 400:
+            return {"content": f"write_asset: backend rejected HTTP {resp.status_code} {resp.text[:300]}", "is_error": True}
+        return {"content": f"write_asset: recorded {a_type} {value} (HTTP {resp.status_code})", "is_error": False}
+    except Exception as e:  # noqa: BLE001
+        log.warning("write_asset: backend unreachable: %s", e)
+        return {"content": f"write_asset: backend unreachable ({type(e).__name__}: {e})", "is_error": True}
+
+
 _FALLBACK_HANDLERS: dict[str, Any] = {
     "http_request": _http_request,
     "write_finding": _write_finding,
     "write_fact": _write_fact,
+    "write_asset": _write_asset,
 }
 
 _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
@@ -252,9 +302,32 @@ _FALLBACK_TOOL_DEFS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "description": {"type": "string", "description": "One concise, factual observation."},
+                "kind": {"type": "string", "enum": ["port", "service", "vuln", "finding", "http", "info"], "description": "Evidence kind (default info)."},
+                "confidence": {"type": "number", "description": "How certain this evidence is, 0..1 (default 0.5). Hard proof = 1.0, weak lead = 0.3."},
                 "run_id": {"type": "string", "description": "Optional run id. Auto-set by the agent."},
             },
             "required": ["description"],
+        },
+    },
+    {
+        "name": "write_asset",
+        "description": (
+            "Record a STRUCTURED asset discovered on the project: a root-domain, "
+            "subdomain, ip, service, app or endpoint. Assets form the durable "
+            "inventory shown in the asset view and reports (unlike write_fact, "
+            "which records board stepping stones). Deduplicated per project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "The discovered asset, e.g. api.example.com or https://example.com/admin."},
+                "type": {"type": "string", "enum": ["root-domain", "subdomain", "ip", "service", "app", "endpoint"], "description": "Asset type (default endpoint)."},
+                "target_id": {"type": "string", "description": "The run's target_id (read from the graph; auto-set when omitted)."},
+                "parent_id": {"type": "string", "description": "Existing parent asset id, e.g. the root-domain asset this subdomain belongs under."},
+                "meta": {"type": "string", "description": "Optional metadata (port, tech, note)."},
+                "run_id": {"type": "string", "description": "Optional run id. Auto-set by the agent."},
+            },
+            "required": ["value"],
         },
     },
     {
@@ -491,7 +564,7 @@ class ToolRegistry:
         if name in _FALLBACK_HANDLERS:
             handler = _FALLBACK_HANDLERS[name]
             # write_finding / write_fact need the current run_id.
-            if name in ("write_finding", "write_fact"):
+            if name in ("write_finding", "write_fact", "write_asset"):
                 return await handler(args, current_run_id=current_run_id)
             # http_request auto-attaches the run's stored session.
             if name == "http_request":

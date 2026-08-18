@@ -41,6 +41,10 @@ type Target struct {
 	Name      string    `json:"name,omitempty"`
 	// Favorite pins the target to the top of lists (user's starred targets).
 	Favorite  bool      `json:"favorite"`
+	// Authorization is a declarative audit note (who authorized the
+	// engagement / written-permission reference). Recorded and surfaced in
+	// reports; it is NOT an enforcement gate.
+	Authorization string    `json:"authorization,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -146,6 +150,7 @@ type Stores struct {
 	Board     *Board
 	Settings  *SettingsStore
 	Knowledge *KnowledgeStore
+	Assets    *AssetStore
 }
 
 // New constructs every store over the shared *db.DB.
@@ -161,6 +166,7 @@ func New(database *db.DB) *Stores {
 		Board:     newBoard(database),
 		Settings:  &SettingsStore{db: database},
 		Knowledge: &KnowledgeStore{db: database},
+		Assets:    &AssetStore{db: database},
 	}
 }
 
@@ -181,9 +187,9 @@ func (s *TargetStore) Create(ctx context.Context, t *Target) error {
 		t.Attributes = json.RawMessage(`{}`)
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, red_lines, name, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.RedLines, t.Name, t.CreatedAt.UnixMilli())
+		`INSERT INTO targets (id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, authorization, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Type, t.Value, t.Normalized, string(t.Attributes), t.AuthContext, t.RedLines, t.Name, boolInt(t.Favorite), t.Authorization, t.CreatedAt.UnixMilli())
 	return err
 }
 
@@ -265,7 +271,7 @@ func (s *TargetStore) Delete(ctx context.Context, id string) error {
 // Get fetches a target by ID.
 func (s *TargetStore) Get(ctx context.Context, id string) (*Target, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, created_at FROM targets WHERE id = ?`, id)
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, authorization, created_at FROM targets WHERE id = ?`, id)
 	return scanTarget(row)
 }
 
@@ -275,7 +281,7 @@ func (s *TargetStore) List(ctx context.Context, limit int) ([]*Target, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, created_at FROM targets
+		`SELECT id, type, value, normalized, attributes, auth_context, red_lines, name, favorite, authorization, created_at FROM targets
 		 ORDER BY favorite DESC, created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -317,7 +323,7 @@ func scanTarget(r rowScanner) (*Target, error) {
 	var attrs string
 	var favorite int
 	var createdMs int64
-	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &t.Name, &favorite, &createdMs); err != nil {
+	if err := r.Scan(&t.ID, &t.Type, &t.Value, &t.Normalized, &attrs, &t.AuthContext, &t.RedLines, &t.Name, &favorite, &t.Authorization, &createdMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -1095,4 +1101,123 @@ func (s *Stores) ClearAllData(ctx context.Context) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// boolInt converts a bool to 0/1 for SQLite INTEGER columns.
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ----- AssetStore -----
+
+// Asset is one structured discovery (subdomain / endpoint / service / ...).
+// Assets are project-scoped and form a tree through ParentID (e.g. a
+// subdomain under its root domain). Unlike facts (board stepping stones),
+// assets are the durable inventory surfaced in the asset view and reports.
+type Asset struct {
+	ID        string    `json:"id"`
+	TargetID  string    `json:"target_id"`
+	RunID     string    `json:"run_id,omitempty"`
+	Type      string    `json:"type"` // root-domain | subdomain | ip | service | app | endpoint
+	Value     string    `json:"value"`
+	Meta      string    `json:"meta,omitempty"`
+	ParentID  string    `json:"parent_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// AssetStore persists discovered assets.
+type AssetStore struct{ db *db.DB }
+
+func (s *AssetStore) Create(ctx context.Context, a *Asset) error {
+	if a.ID == "" {
+		a.ID = uuid.NewString()
+	}
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now().UTC()
+	}
+	if a.Type == "" {
+		a.Type = "endpoint"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO assets (id, target_id, run_id, type, value, meta, parent_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.TargetID, a.RunID, a.Type, a.Value, a.Meta, a.ParentID, a.CreatedAt.UnixMilli())
+	return err
+}
+
+// CreateIfAbsent inserts an asset only if no same-type+value exists for the
+// target (subdomain "x.example.com" recorded by two workers/runs is one row).
+func (s *AssetStore) CreateIfAbsent(ctx context.Context, a *Asset) (created bool, existingID string, err error) {
+	if a.ID == "" {
+		a.ID = uuid.NewString()
+	}
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now().UTC()
+	}
+	if a.Type == "" {
+		a.Type = "endpoint"
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer tx.Rollback()
+	var id string
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM assets WHERE target_id = ? AND value = ? LIMIT 1`, a.TargetID, a.Value).Scan(&id)
+	if err == nil {
+		return false, id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, "", err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO assets (id, target_id, run_id, type, value, meta, parent_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.TargetID, a.RunID, a.Type, a.Value, a.Meta, a.ParentID, a.CreatedAt.UnixMilli()); err != nil {
+		return false, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
+}
+
+// ListByTarget returns all assets for a project, tree-first order.
+func (s *AssetStore) ListByTarget(ctx context.Context, targetID string, limit int) ([]*Asset, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, target_id, run_id, type, value, meta, parent_id, created_at
+		 FROM assets WHERE target_id = ? ORDER BY parent_id ASC, created_at ASC LIMIT ?`, targetID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*Asset, 0)
+	for rows.Next() {
+		a, err := scanAsset(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func scanAsset(r rowScanner) (*Asset, error) {
+	var a Asset
+	var ms int64
+	if err := r.Scan(&a.ID, &a.TargetID, &a.RunID, &a.Type, &a.Value, &a.Meta, &a.ParentID, &ms); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	a.CreatedAt = time.UnixMilli(ms).UTC()
+	return &a, nil
 }

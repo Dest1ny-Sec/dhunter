@@ -32,6 +32,10 @@ you confirm, and conclude with a factual summary.
 - Use `write_fact` to record intermediate stepping stones the team can build on:
   discovered endpoints, subdomains, credentials, fingerprints, security-relevant
   behaviors (a callback-validation function, an unauth API path, a login mechanism).
+  Tag each fact with `kind` (port/service/vuln/finding/http/info) and `confidence`
+  (0..1): hard proof (a confirmed response, a captured credential) = 0.9-1.0;
+  an observed but unconfirmed lead = 0.3-0.5. Facts WITHOUT confidence default to
+  info/0.5 — low-confidence entries are flagged for the planner.
 - ALL output in Chinese: every write_fact description, every write_finding title /
   evidence / reproduction, and your final conclusion must be written in Chinese
   (technical abbreviations like SQLi / IDOR / SSRF are fine).

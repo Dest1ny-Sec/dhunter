@@ -45,6 +45,7 @@ const authHeaders = ref('')
 const authNote = ref('')
 // custom guardrails the AI must always follow
 const redLines = ref('')
+const authorization = ref('')
 
 const placeholders: Record<string, string> = {
   auto: '例如 acme.com、https://acme.com、10.0.0.1，或"某科技公司"',
@@ -138,6 +139,7 @@ async function start() {
       input: target.value.trim(), type: targetType.value,
       name: projName.value.trim(),
       max_workers: Number(maxWorkers.value) || 0,
+      authorization: authorization.value.trim(),
     })
     const targetId = tRes.data?.id
     if (!targetId) throw new Error('No target id returned')
@@ -180,6 +182,7 @@ function resetForm() {
   authA.value = { username: '', password: '', login_url: '', cookies: '' }
   authB.value = { username: '', password: '', login_url: '', cookies: '' }
   redLines.value = ''
+  authorization.value = ''
   showForm.value = false
   error.value = null
 }
@@ -371,6 +374,11 @@ onBeforeUnmount(() => {
         <label class="field-label">红线 / 自定义要求（AI 每一轮都必须遵守，每行一条）</label>
         <textarea v-model="redLines" rows="2" style="width: 100%; font-size: 12.5px"
           placeholder="例如：禁止爆破/高频请求&#10;只在授权范围测试&#10;不测试支付/资金相关接口&#10;发现任何涉及用户数据的问题立即停止并上报" />
+      </div>
+      <div>
+        <label class="field-label">授权说明（可选，写入报告留痕：谁授权的 / 书面许可引用）</label>
+        <input v-model="authorization" style="width: 100%; font-size: 12.5px"
+          placeholder="例如：甲方 XX 公司书面授权，编号 TX-2026-001，授权人 张三" />
       </div>
       <div v-if="error" class="form-error">
         <Icon name="alert" :size="14" />

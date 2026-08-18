@@ -47,6 +47,9 @@ type createTargetReq struct {
 	Name       string `json:"name"`
 	RedLines   string `json:"red_lines"`
 	MaxWorkers int    `json:"max_workers"`
+	// Authorization: declarative audit note (who authorized the engagement,
+	// written-permission reference). Recorded and surfaced in reports.
+	Authorization string `json:"authorization"`
 }
 
 // Create handles POST /api/targets.
@@ -96,13 +99,14 @@ func (h *TargetHandler) Create(c *gin.Context) {
 	}
 
 	t := &store.Target{
-		Type:       detected,
-		Value:      req.Input,
-		Normalized: normalized,
-		Attributes: attrJSON,
-		RedLines:   strings.TrimSpace(req.RedLines),
-		Name:       strings.TrimSpace(req.Name),
-		CreatedAt:  time.Now().UTC(),
+		Type:          detected,
+		Value:         req.Input,
+		Normalized:    normalized,
+		Attributes:    attrJSON,
+		RedLines:      strings.TrimSpace(req.RedLines),
+		Name:          strings.TrimSpace(req.Name),
+		Authorization: strings.TrimSpace(req.Authorization),
+		CreatedAt:     time.Now().UTC(),
 	}
 	if err := h.Stores.Targets.Create(c.Request.Context(), t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "create target: " + err.Error()})

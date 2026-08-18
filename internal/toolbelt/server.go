@@ -93,12 +93,13 @@ func toolsList() []toolDef {
 			InputSchema: obj(map[string]interface{}{
 				"impact": str("string", "critical|high|medium|low"), "evidence": str("string", ""),
 			}, []string{"impact", "evidence"})},
-		{Name: "write_finding", Description: "Record a CONFIRMED vulnerability to the platform. Call ONLY with reproducible evidence. Requires run_id.",
+		{Name: "write_finding", Description: "Record a CONFIRMED vulnerability to the platform. Call ONLY with reproducible evidence (numbered steps the verifier re-plays). Requires run_id, title and reproduction.",
 			InputSchema: obj(map[string]interface{}{
 				"run_id": str("string", "the current run's id (the agent passes it automatically)"),
 				"title": str("string", ""), "severity": str("string", "critical|high|medium|low|info"),
 				"target": str("string", "affected URL/host"), "evidence": str("string", "PoC + proof"),
-			}, []string{"title", "run_id"})},
+				"reproduction": str("string", "REQUIRED: ordered reproduction steps (numbered curl commands + expected result) the verifier re-runs"),
+			}, []string{"title", "run_id", "reproduction"})},
 	}
 	return append(builtins, customToolDefs()...)
 }

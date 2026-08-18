@@ -154,6 +154,22 @@ var migrations = []string{
 		value TEXT NOT NULL DEFAULT ''
 	);`,
 
+	// assets — structured discovered assets (root-domain/subdomain/ip/
+	// service/app/endpoint) with an optional parent for the asset tree.
+	// Project-scoped (target_id); the discovering run_id is kept for audit.
+	`CREATE TABLE IF NOT EXISTS assets (
+		id          TEXT PRIMARY KEY,
+		target_id   TEXT NOT NULL,
+		run_id      TEXT NOT NULL DEFAULT '',
+		type        TEXT NOT NULL,
+		value       TEXT NOT NULL,
+		meta        TEXT NOT NULL DEFAULT '',
+		parent_id   TEXT NOT NULL DEFAULT '',
+		created_at  INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_assets_target ON assets(target_id);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_target_value ON assets(target_id, value);`,
+
 	// knowledge — cross-target reusable intel (endpoints, creds, fingerprints)
 	// learned from one run and injected into later runs on the same host family.
 	`CREATE TABLE IF NOT EXISTS knowledge (
@@ -189,6 +205,9 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"targets", "red_lines TEXT NOT NULL DEFAULT ''"},
 		{"targets", "name TEXT NOT NULL DEFAULT ''"},
 		{"targets", "favorite INTEGER NOT NULL DEFAULT 0"},
+		{"targets", "authorization TEXT NOT NULL DEFAULT ''"},
+		{"facts", "kind TEXT NOT NULL DEFAULT 'info'"},
+		{"facts", "confidence REAL NOT NULL DEFAULT 0.5"},
 	} {
 		if !d.columnExists(ctx, col.table, strings.TrimSpace(strings.SplitN(col.def, " ", 2)[0])) {
 			if _, err := d.ExecContext(ctx, "ALTER TABLE "+col.table+" ADD COLUMN "+col.def); err != nil {

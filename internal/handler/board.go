@@ -45,8 +45,10 @@ func (h *BoardHandler) ListFacts(c *gin.Context) {
 }
 
 type createFactReq struct {
-	Description string `json:"description"`
-	Source      string `json:"source"`
+	Description string  `json:"description"`
+	Source      string  `json:"source"`
+	Kind        string  `json:"kind"`
+	Confidence  float64 `json:"confidence"`
 }
 
 func (h *BoardHandler) CreateFact(c *gin.Context) {
@@ -64,10 +66,15 @@ func (h *BoardHandler) CreateFact(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "description required"})
 		return
 	}
+	if body.Confidence <= 0 || body.Confidence > 1 {
+		body.Confidence = 0.5
+	}
 	f := &store.Fact{
 		RunID:       runID,
 		Description: body.Description,
 		Source:      body.Source,
+		Kind:        body.Kind,
+		Confidence:  body.Confidence,
 		CreatedAt:   time.Now().UTC(),
 	}
 	if err := h.Stores.Board.Facts.Create(c.Request.Context(), f); err != nil {

@@ -35,7 +35,12 @@ type Fact struct {
 	RunID       string    `json:"run_id"`
 	Description string    `json:"description"`
 	Source      string    `json:"source"`
-	CreatedAt   time.Time `json:"created_at"`
+	// Kind tags the observation: port / service / vuln / finding / http /
+	// info. Confidence (0..1) marks how certain the evidence is — the
+	// planner can weight low-confidence facts differently from hard proof.
+	Kind       string    `json:"kind,omitempty"`
+	Confidence float64   `json:"confidence,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Intent is one declared direction of exploration.
@@ -88,15 +93,18 @@ func (s *FactStore) Create(ctx context.Context, f *Fact) error {
 	if f.CreatedAt.IsZero() {
 		f.CreatedAt = time.Now().UTC()
 	}
+	if f.Kind == "" {
+		f.Kind = "info"
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO facts (id, run_id, description, source, created_at) VALUES (?, ?, ?, ?, ?)`,
-		f.ID, f.RunID, f.Description, f.Source, f.CreatedAt.UnixMilli())
+		`INSERT INTO facts (id, run_id, description, source, kind, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.RunID, f.Description, f.Source, f.Kind, f.Confidence, f.CreatedAt.UnixMilli())
 	return err
 }
 
 func (s *FactStore) ListByRun(ctx context.Context, runID string) ([]*Fact, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, run_id, description, source, created_at FROM facts WHERE run_id = ? ORDER BY created_at ASC, id ASC`, runID)
+		`SELECT id, run_id, description, source, kind, confidence, created_at FROM facts WHERE run_id = ? ORDER BY created_at ASC, id ASC`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +123,7 @@ func (s *FactStore) ListByRun(ctx context.Context, runID string) ([]*Fact, error
 func scanFact(r rowScanner) (*Fact, error) {
 	var f Fact
 	var ms int64
-	if err := r.Scan(&f.ID, &f.RunID, &f.Description, &f.Source, &ms); err != nil {
+	if err := r.Scan(&f.ID, &f.RunID, &f.Description, &f.Source, &f.Kind, &f.Confidence, &ms); err != nil {
 		return nil, err
 	}
 	f.CreatedAt = time.UnixMilli(ms).UTC()
@@ -273,8 +281,8 @@ func (s *IntentStore) Conclude(ctx context.Context, runID, id, worker, descripti
 		return nil, ErrNotFound
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO facts (id, run_id, description, source, created_at) VALUES (?, ?, ?, ?, ?)`,
-		f.ID, f.RunID, f.Description, f.Source, now.UnixMilli()); err != nil {
+		`INSERT INTO facts (id, run_id, description, source, kind, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.RunID, f.Description, f.Source, "info", 0.5, now.UnixMilli()); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

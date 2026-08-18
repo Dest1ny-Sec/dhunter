@@ -91,6 +91,11 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 		api.GET("/knowledge", settingsH.KnowledgeList)
 		api.POST("/knowledge", settingsH.KnowledgeAdd)
 
+		// Assets — structured project inventory (subdomains/endpoints/...).
+		assetH := handler.NewAssetHandler(stores)
+		api.GET("/targets/:id/assets", assetH.List)
+		api.POST("/targets/:id/assets", assetH.Create)
+
 		api.GET("/status", func(c *gin.Context) {
 			hc := &http.Client{Timeout: 3 * time.Second}
 			probe := func(url string) string {

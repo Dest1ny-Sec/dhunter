@@ -390,6 +390,18 @@ def parse_json_object(text: str) -> dict[str, Any]:
 REASON_MAX_FACTS = int(os.environ.get("DHUNTER_REASON_MAX_FACTS", "40"))
 
 
+def _fact_line(f: dict[str, Any]) -> str:
+    """One compact fact line, including kind and a low-confidence marker so
+    the planner can weight weak leads differently from hard proof."""
+    desc = (f.get("description") or "").strip().replace("\n", " ")
+    if len(desc) > 140:
+        desc = desc[:140] + "…"
+    kind = (f.get("kind") or "info")[:8]
+    conf = float(f.get("confidence") or 0.5)
+    marker = "" if conf >= 0.7 else f" [低置信 {conf:.2f}]"
+    return f"- {f.get('id', '?')} ({kind}){marker}: {desc}"
+
+
 def render_graph_summary(graph: dict[str, Any], max_facts: int = REASON_MAX_FACTS, known_fact_ids: set[str] | None = None) -> str:
     """Compact, token-cheap rendering of the board for LLM prompts.
     Facts are one line each; open intents and hints are listed. The full
@@ -408,10 +420,7 @@ def render_graph_summary(graph: dict[str, Any], max_facts: int = REASON_MAX_FACT
         lines.append(f"## Confirmed facts ({len(facts)} total, {len(new_facts)} new since last planning)")
         recent = new_facts[-max_facts:]
         for i, f in enumerate(recent):
-            desc = (f.get("description") or "").strip().replace("\n", " ")
-            if len(desc) > 140:
-                desc = desc[:140] + "…"
-            lines.append(f"- {f.get('id', '?')}: {desc}")
+            lines.append(_fact_line(f))
         if not new_facts:
             lines.append("- (no new facts since last planning)")
     else:
@@ -421,10 +430,7 @@ def render_graph_summary(graph: dict[str, Any], max_facts: int = REASON_MAX_FACT
         if dropped > 0:
             lines.append(f"(showing the latest {len(recent)} of {len(facts)} facts)")
         for i, f in enumerate(recent):
-            desc = (f.get("description") or "").strip().replace("\n", " ")
-            if len(desc) > 140:
-                desc = desc[:140] + "…"
-            lines.append(f"- {f.get('id', '?')}: {desc}")
+            lines.append(_fact_line(f))
 
     open_its = [i for i in intents if i.get("status") in ("open", "claimed")]
     lines.append(f"## Open intents ({len(open_its)})")

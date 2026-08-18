@@ -706,3 +706,108 @@ func TestTargetFavoriteContract(t *testing.T) {
 		t.Fatalf("after unpin newest should sort first: %v", arr[0])
 	}
 }
+
+// --- assets (structured inventory) ----------------------------------------
+
+func TestAssetsContract(t *testing.T) {
+	e := newE2E(t)
+	code, tgt := e.mustJSON(t, "POST", "/api/targets", e.token, map[string]any{"input": "asset.example.com", "type": "auto"})
+	if code != 201 {
+		t.Fatalf("create target = %d", code)
+	}
+	targetID := tgt["id"].(string)
+
+	// Root domain, then a subdomain under it (parent_id), then a duplicate.
+	code, root := e.mustJSON(t, "POST", "/api/targets/"+targetID+"/assets", e.token, map[string]any{
+		"type": "root-domain", "value": "asset.example.com",
+	})
+	if code != 201 {
+		t.Fatalf("add root asset = %d (%v)", code, root)
+	}
+	code, sub := e.mustJSON(t, "POST", "/api/targets/"+targetID+"/assets", e.token, map[string]any{
+		"type": "subdomain", "value": "api.asset.example.com", "parent_id": root["id"].(string),
+	})
+	if code != 201 {
+		t.Fatalf("add subdomain = %d (%v)", code, sub)
+	}
+	// Same value → dedup 409 (points at the ORIGINAL subdomain row).
+	code, dup := e.mustJSON(t, "POST", "/api/targets/"+targetID+"/assets", e.token, map[string]any{
+		"type": "subdomain", "value": "api.asset.example.com",
+	})
+	if code != 409 || dup["existing_id"] != sub["id"] {
+		t.Fatalf("duplicate asset = %d (%v), want 409 existing_id=%v", code, dup, sub["id"])
+	}
+
+	// List returns both, ordered tree-first.
+	code, list := e.mustJSON(t, "GET", "/api/targets/"+targetID+"/assets", e.token, nil)
+	if code != 200 {
+		t.Fatalf("list assets = %d", code)
+	}
+	arr := list["assets"].([]any)
+	if len(arr) != 2 {
+		t.Fatalf("assets = %d, want 2", len(arr))
+	}
+
+	// Project report includes the asset inventory.
+	resp, raw := e.do(t, "GET", "/api/targets/"+targetID+"/report", e.token, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("report = %d", resp.StatusCode)
+	}
+	if !bytes.Contains(raw, []byte("## 资产清单")) || !bytes.Contains(raw, []byte("api.asset.example.com")) {
+		t.Fatalf("report missing asset section: %s", raw[:minInt2(len(raw), 300)])
+	}
+}
+
+// --- target authorization (audit note) ------------------------------------
+
+func TestTargetAuthorizationAudit(t *testing.T) {
+	e := newE2E(t)
+	code, tgt := e.mustJSON(t, "POST", "/api/targets", e.token, map[string]any{
+		"input": "auth.example.com", "type": "auto", "authorization": "甲方书面授权 TX-2026-001",
+	})
+	if code != 201 {
+		t.Fatalf("create target = %d", code)
+	}
+	// Round-trips on GET.
+	code, got := e.mustJSON(t, "GET", "/api/targets/"+tgt["id"].(string), e.token, nil)
+	if code != 200 || got["authorization"] != "甲方书面授权 TX-2026-001" {
+		t.Fatalf("authorization not persisted: %v", got)
+	}
+	// Run + report surface it.
+	_, run := e.mustJSON(t, "POST", "/api/runs", e.token, map[string]any{"target_id": tgt["id"], "objective": "x"})
+	resp, raw := e.do(t, "GET", "/api/runs/"+run["run_id"].(string)+"/report", e.token, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("run report = %d", resp.StatusCode)
+	}
+	if !bytes.Contains(raw, []byte("授权说明")) || !bytes.Contains(raw, []byte("TX-2026-001")) {
+		t.Fatalf("run report missing authorization: %s", raw[:minInt2(len(raw), 300)])
+	}
+}
+
+// --- fact kind + confidence ----------------------------------------------
+
+func TestFactKindAndConfidence(t *testing.T) {
+	e := newE2E(t)
+	_, tgt := e.mustJSON(t, "POST", "/api/targets", e.token, map[string]any{"input": "fact.example.com", "type": "auto"})
+	_, run := e.mustJSON(t, "POST", "/api/runs", e.token, map[string]any{"target_id": tgt["id"], "objective": "x"})
+	runID := run["run_id"].(string)
+
+	code, _ := e.mustJSON(t, "POST", "/api/runs/"+runID+"/facts", e.token, map[string]any{
+		"description": "port 443 open", "kind": "service", "confidence": 0.9,
+	})
+	if code != 201 {
+		t.Fatalf("create fact = %d", code)
+	}
+	code, list := e.mustJSON(t, "GET", "/api/runs/"+runID+"/facts", e.token, nil)
+	if code != 200 {
+		t.Fatalf("list facts = %d", code)
+	}
+	arr := list["facts"].([]any)
+	if len(arr) == 0 {
+		t.Fatal("no facts")
+	}
+	f := arr[0].(map[string]any)
+	if f["kind"] != "service" || f["confidence"] != 0.9 {
+		t.Fatalf("fact kind/confidence not persisted: %v", f)
+	}
+}
