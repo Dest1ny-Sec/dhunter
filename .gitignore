@@ -4,6 +4,10 @@
 # (Go server falls back to "API only" without it.)
 # dist/
 
+# Release build output (created by scripts/build-release.sh) — kept local,
+# uploaded to GitHub Releases instead.
+dist-release/
+
 # Runtime data (SQLite DB, WAL, SHM)
 data/*.db
 data/*.db-wal
