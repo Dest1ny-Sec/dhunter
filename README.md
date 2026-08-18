@@ -34,13 +34,35 @@
 
 <p align="center">
   <img src="assets/screenshots/targets.png" width="49%" alt="授权目标管理（含并发设置/导出/删除）" />
-  <img src="assets/screenshots/search.png" width="49%" alt="历史对话全文搜索" />
+  <img src="assets/screenshots/run-tools-external.png" width="49%" alt="工具活动面板（External MCP 工具高亮）" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/library-mcp.png" width="49%" alt="库 → MCP 扩展中心" />
+  <img src="assets/screenshots/library-skills.png" width="49%" alt="库 → Skills（官方+自定义）" />
 </p>
 
 <p align="center">
   <img src="assets/screenshots/report.png" width="49%" alt="Markdown 漏洞报告" />
   <img src="assets/screenshots/settings.png" width="49%" alt="设置：模型/账号/并发/清空数据" />
 </p>
+
+## ✨ v0.7.1 新增（库 / MCP 扩展中心 / External 工具）
+
+> 新增一级菜单 **库**（侧栏中部），里面分三个 tab：
+
+**MCP 扩展** — 把你自己的 MCP server 接进来。工具以 `<server>::<tool>` 命名空间暴露给 Agent，与内置 22 个工具并行。修改后点「同步到 Agent」即时生效，不必重启。
+
+- 每行显示「● Agent 已同步 · 58 秒前」+ per-row 状态指示（绿/红/灰点 + 工具数）
+- 私网 / loopback / 云元数据 URL 自动加 ⚠ 黄色提示（不阻断，本地 MCP 合法）
+- Token 仅在 Create 响应中明文返回一次
+- 工具数量上限保护（单 server 100，整个 external 池 300）
+
+**Skills** — agent 的可复用工作流（系统 prompt / 提示策略），按场景启用。3 个内置技能种子（Web 攻击面排查 / API Fuzz 工作流 / 漏洞报告写作），可基于此创建自定义副本。
+
+**模板** — 行业场景包（OWASP Top 10、API Fuzz 入门、JS 深度审计），一键导入。
+
+RunDetail 工具活动面板：命名空间工具自动加 `EXTERNAL` 标签，与内置工具一眼区分。
 
 ## ✨ 核心特性
 
@@ -51,11 +73,13 @@
 | ⚔️ **主动测试** | HTTP 手工探测、参数 fuzz、认证绕过、信息泄露路径、业务逻辑测试，agent 自主选工具 |
 | 🛡️ **SRC 验收门禁** | verifier 对每条漏洞做**机械重放 + 稳定性检查**：同一 PoC 两次结果不一致 = 时变噪声 → 自动驳回，杜绝误报 |
 | 🎯 **漏洞优先验证** | worker 每落地一条漏洞立即触发 verifier 机械重放验证，不用等扫描结束 |
+| 🔌 **MCP 扩展中心** | 把你自己的 MCP server 接进来，工具以 `<server>::<tool>` 命名空间暴露，UI 一键增删测 + 同步到 agent |
+| 🧰 **库 / Skills / 模板** | 一级菜单「库」聚合 MCP / Skills / 模板三类可复用资产，3 个内置 skill 种子可基于此创建自定义副本 |
 | 🧵 **每项目并发设置** | 创建目标时可指定并发 worker 数，深挖大目标时加大并发、小目标降速省 token |
 | ⏸️ **运行暂停/恢复** | 随时暂停 run（保留已发现的黑板），之后一键「继续」从断点恢复 |
 | 📦 **项目一键导出** | 目标卡上「导出报告」一键打包该项目全部漏洞为 Markdown（含 PoC/复现/证据） |
-| ⚡ **实时思考流** | SSE 实时推送 agent 的思考、工具调用、工具结果，整个过程透明可见 |
-| 📄 **一键报告** | 每次运行导出 Markdown 报告 |
+| ⚡ **实时思考流** | SSE 实时推送 agent 的思考、工具调用、工具结果，整个过程透明可见；命名空间工具带 EXTERNAL 标签 |
+| 📄 **一键报告** | 每次运行导出 Markdown 报告（v0.6.0 起 PoC 块带 verifier 机械复现记录 + curl 复现命令） |
 | 🔐 **首启自动账号** | 首次运行自动生成管理账号（用户名 + 随机密码），横幅展示，之后可在设置页修改 |
 | 💻 **跨平台** | macOS / Linux / Windows 三平台启动脚本，Go 纯静态二进制（无 CGO） |
 
