@@ -144,7 +144,14 @@ func shellFlagForOS() string {
 // safeExec runs an external binary with a hard timeout and capped output.
 // It's the only way tools talk to on-disk scanners, so it must never leak
 // a goroutine or unbounded memory.
+//
+// `name` is a bare command name (looked up on PATH), NOT a path: LLM-driven
+// tools must never be able to point this at an arbitrary executable (e.g.
+// an attacker-planted binary). Path separators are rejected outright.
 func safeExec(ctx context.Context, timeout time.Duration, name string, args ...string) (string, error) {
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("refusing to exec non-bare command name %q", name)
+	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

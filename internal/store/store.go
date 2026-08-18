@@ -1221,3 +1221,24 @@ func scanAsset(r rowScanner) (*Asset, error) {
 	a.CreatedAt = time.UnixMilli(ms).UTC()
 	return &a, nil
 }
+
+// Count returns the total number of runs (used by /api/metrics).
+func (s *RunStore) Count(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&n)
+	return n, err
+}
+
+// CountActive returns runs still in a non-terminal state.
+func (s *RunStore) CountActive(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE status IN ('running','pending')`).Scan(&n)
+	return n, err
+}
+
+// Count returns the total number of vulnerabilities (used by /api/metrics).
+func (s *VulnStore) Count(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vulnerabilities`).Scan(&n)
+	return n, err
+}

@@ -32,7 +32,7 @@ func fetchJS(ctx context.Context, args map[string]interface{}) toolResult {
 
 	// 1) try katana; fall back to fetching the page HTML directly
 	html := ""
-	if out, err := safeExec(ctx, 5*time.Minute, argString(args, "bin", "katana"),
+	if out, err := safeExec(ctx, 5*time.Minute, "katana",
 		"-u", target, "-d", strconv.Itoa(depth), "-jc", "-kf", "all", "-silent"); err == nil {
 		html = out
 	} else {

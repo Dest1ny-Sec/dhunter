@@ -52,3 +52,15 @@ func TestSearchEngineParsesTitlesWithoutPanic(t *testing.T) {
 		t.Fatalf("title B = %q, want 'Target B'", byURL["https://target.example.com/b"])
 	}
 }
+
+// safeExec must refuse non-bare command names (LLM-driven tools must never
+// point it at an arbitrary executable path).
+func TestSafeExecRejectsPathCommandNames(t *testing.T) {
+	for _, name := range []string{"/bin/rm", "./evil", "a/b", `C:\evil.exe`} {
+		if _, err := safeExec(context.Background(), time.Second, name, "-rf", "/"); err == nil {
+			t.Fatalf("safeExec(%q) should be rejected", name)
+		} else if !strings.Contains(err.Error(), "non-bare") {
+			t.Fatalf("safeExec(%q) error = %v, want non-bare message", name, err)
+		}
+	}
+}

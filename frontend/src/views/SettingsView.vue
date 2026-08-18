@@ -216,6 +216,12 @@ onMounted(load)
         </div>
         <UiBadge kind="status" :value="status?.mcp?.status || 'pending'" :dot="true" />
       </div>
+      <!-- 外部扫描器可用性（缺失自动跳过，不报错） -->
+      <div v-if="status?.mcp?.availability" class="tool-chips">
+        <span v-for="(ok, name) in status.mcp.availability" :key="name" class="tool-chip" :class="ok ? 'avail' : 'missing'" :title="ok ? name + ' 已安装' : name + ' 未安装（agent 会自动跳过，改用替代方法）'">
+          {{ ok ? '✓' : '✗' }} {{ name }}
+        </span>
+      </div>
       <div v-if="(status?.mcp?.tools || []).length" class="tool-chips">
         <span v-for="t in status.mcp.tools" :key="t" class="tool-chip">{{ t }}</span>
       </div>
@@ -253,5 +259,7 @@ onMounted(load)
   background: var(--bg-elev-2); border: 1px solid var(--border);
   border-radius: 999px; padding: 2px 10px; color: var(--text-dim);
 }
+.tool-chip.avail { color: var(--ok); border-color: rgba(16,185,129,0.3); }
+.tool-chip.missing { color: var(--text-faint); text-decoration: line-through; }
 @media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr; } }
 </style>

@@ -166,11 +166,53 @@ status_all() {
   echo "→ Logs: tail -f /tmp/dhunter-{server,agent,mcp}.log"
 }
 
+# watch_all — 简易 watchdog：前台循环检测三件套，任何一个挂了自动拉起并记录重启次数。
+# 生产环境建议改用 systemd / supervisor / docker restart=always。
+watch_all() {
+  echo "== Dhunter watchdog 启动（Ctrl+C 退出）=="
+  declare -A RESPAWN
+  while true; do
+    # 1. MCP (19124 → 由 token 文件决定端口？固定 9124)
+    if ! lsof -ti :$MCP_PORT >/dev/null 2>&1; then
+      nohup "$MCP_BIN" -addr "0.0.0.0:$MCP_PORT" -t "$MCP_TOKEN" > /tmp/dhunter-mcp.log 2>&1 &
+      RESPAWN[mcp]=$(( ${RESPAWN[mcp]:-0} + 1 ))
+      echo "[watch] $(date '+%H:%M:%S') dhunter-mcp 已重启 (第 ${RESPAWN[mcp]} 次)"
+    fi
+    # 2. Python agent (9100)
+    if ! lsof -ti :$AGENT_PORT >/dev/null 2>&1; then
+      cd "$AGENT_DIR"
+      DHUNTER_AGENT_TOKEN="$PLAT_TOKEN" \
+      DHUNTER_MCP_URL="http://127.0.0.1:$MCP_PORT/message" \
+      DHUNTER_MCP_TOKEN="$MCP_TOKEN" \
+      DHUNTER_BACKEND_URL="http://127.0.0.1:$PLAT_PORT" \
+      DHUNTER_BACKEND_TOKEN="$PLAT_TOKEN" \
+        nohup python3 -m uvicorn core.server:app --host 127.0.0.1 --port $AGENT_PORT > /tmp/dhunter-agent.log 2>&1 &
+      cd "$ROOT"
+      RESPAWN[agent]=$(( ${RESPAWN[agent]:-0} + 1 ))
+      echo "[watch] $(date '+%H:%M:%S') python-agent 已重启 (第 ${RESPAWN[agent]} 次)"
+    fi
+    # 3. Go server (13343)
+    if ! lsof -ti :$PLAT_PORT >/dev/null 2>&1; then
+      DHUNTER_ADMIN_TOKEN="$PLAT_TOKEN" \
+      DHUNTER_AGENT_TOKEN="$PLAT_TOKEN" \
+      DHUNTER_MCP_TOKEN="$MCP_TOKEN" \
+        nohup "$PLAT_BIN" --config "$ROOT/configs/dhunter.yaml" --http > /tmp/dhunter-server.log 2>&1 &
+      RESPAWN[server]=$(( ${RESPAWN[server]:-0} + 1 ))
+      echo "[watch] $(date '+%H:%M:%S') dhunter-server 已重启 (第 ${RESPAWN[server]} 次)"
+    fi
+    sleep 5
+  done
+}
+
 case "${1:-start}" in
   start)   start_all ;;
   stop)    stop_all ;;
   restart) stop_all; sleep 2; start_all ;;
   status)  status_all ;;
+  logs)    tail -f /tmp/dhunter-server.log /tmp/dhunter-agent.log /tmp/dhunter-mcp.log ;;
+  watch)   watch_all ;;
+  *) echo "用法: $0 {start|stop|restart|status|logs|watch}"; exit 1 ;;
+esac
   logs)    tail -f /tmp/dhunter-server.log /tmp/dhunter-agent.log /tmp/dhunter-mcp.log ;;
   *) echo "用法: $0 {start|stop|restart|status|logs}"; exit 1 ;;
 esac

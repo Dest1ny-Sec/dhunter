@@ -99,3 +99,15 @@ func (h *Hub) SubscriberCount(runID string) int {
 	defer h.mu.RUnlock()
 	return len(h.subs[runID])
 }
+
+// TotalSubscribers returns the number of active subscriber channels across
+// all runs (used by /api/metrics).
+func (h *Hub) TotalSubscribers() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for _, set := range h.subs {
+		n += len(set)
+	}
+	return n
+}

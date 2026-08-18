@@ -368,3 +368,29 @@ func listMCPTools(mcpURL, token string) []string {
 	}
 	return names
 }
+
+// mcpToolAvailability asks the MCP sidecar which external binaries are on
+// PATH, so the UI can show "subfinder ✓ / nmap ✗(自动跳过)" instead of the
+// user hitting a silent failure on a clean machine. Returns nil on error.
+func mcpToolAvailability(mcpBase, token string) map[string]bool {
+	if mcpBase == "" {
+		return nil
+	}
+	req, _ := http.NewRequest("GET", mcpBase+"/availability", nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Available map[string]bool `json:"available"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil
+	}
+	return out.Available
+}

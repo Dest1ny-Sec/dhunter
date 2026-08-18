@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os/exec"
 	"net/http"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ func toolsList() []toolDef {
 			}, []string{"query"})},
 		{Name: "subfinder_enum", Description: "Subdomain enumeration via the subfinder binary.",
 			InputSchema: obj(map[string]interface{}{
-				"domain": str("string", ""), "threads": str("integer", "optional"), "bin": str("string", "binary path"),
+				"domain": str("string", ""), "threads": str("integer", "optional"),
 			}, []string{"domain"})},
 		{Name: "assetfinder_enum", Description: "Passive subdomain enumeration via assetfinder.",
 			InputSchema: obj(map[string]interface{}{"domain": str("string", "")}, []string{"domain"})},
@@ -255,6 +256,18 @@ func Serve(addr, token string) error {
 			"status": "ok", "service": "dhunter-mcp", "tools": len(toolsList()),
 			"ts": time.Now().Format(time.RFC3339),
 		})
+	})
+	// /availability reports which external binaries are actually on PATH —
+	// lets the UI tell the user "subfinder 已安装 / nmap 缺失(将自动跳过)"
+	// instead of failing silently on a clean machine.
+	mux.HandleFunc("/availability", func(w http.ResponseWriter, _ *http.Request) {
+		deps := []string{"subfinder", "assetfinder", "katana", "gau", "waybackurls", "httpx", "nmap", "arjun", "uro"}
+		out := make(map[string]bool, len(deps))
+		for _, d := range deps {
+			_, err := exec.LookPath(d)
+			out[d] = err == nil
+		}
+		writeJSON(w, 200, map[string]interface{}{"available": out, "ts": time.Now().Format(time.RFC3339)})
 	})
 	mux.HandleFunc("/message", HandleJSONRPC)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

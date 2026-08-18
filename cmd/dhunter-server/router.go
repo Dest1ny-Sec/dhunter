@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -77,6 +79,28 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 		searchH := handler.NewSearchHandler(stores)
 		api.GET("/search/messages", searchH.Messages)
 
+		// Lightweight Prometheus-style metrics (runtime + business counters).
+		// Auth-gated; scrape-friendly text format, no external deps.
+		api.GET("/metrics", func(c *gin.Context) {
+			ctx := c.Request.Context()
+			runsTotal, _ := stores.Runs.Count(ctx)
+			runsActive, _ := stores.Runs.CountActive(ctx)
+			vulnsTotal, _ := stores.Vulns.Count(ctx)
+			var mem runtime.MemStats
+			runtime.ReadMemStats(&mem)
+			subscribers := hub.TotalSubscribers()
+			var b strings.Builder
+			b.WriteString("# HELP dhunter_runs_total Total runs ever started.\n# TYPE dhunter_runs_total gauge\n")
+			fmt.Fprintf(&b, "dhunter_runs_total %d\n", runsTotal)
+			fmt.Fprintf(&b, "# TYPE dhunter_runs_active gauge\ndhunter_runs_active %d\n", runsActive)
+			fmt.Fprintf(&b, "# TYPE dhunter_vulns_total gauge\ndhunter_vulns_total %d\n", vulnsTotal)
+			fmt.Fprintf(&b, "# TYPE dhunter_hub_subscribers gauge\ndhunter_hub_subscribers %d\n", subscribers)
+			fmt.Fprintf(&b, "# TYPE go_goroutines gauge\ngo_goroutines %d\n", runtime.NumGoroutine())
+			fmt.Fprintf(&b, "# TYPE go_memstats_alloc_bytes gauge\ngo_memstats_alloc_bytes %d\n", mem.Alloc)
+			c.Header("Content-Type", "text/plain; version=0.0.4")
+			c.String(http.StatusOK, b.String())
+		})
+
 		// Platform status — lets the UI self-describe the bundled services
 		// instead of asking the user to configure them by hand. The server
 		// probes its own MCP + agent sidecars (the browser can't, cross-origin).
@@ -96,8 +120,7 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 		api.GET("/targets/:id/assets", assetH.List)
 		api.POST("/targets/:id/assets", assetH.Create)
 
-		api.GET("/status", func(c *gin.Context) {
-			hc := &http.Client{Timeout: 3 * time.Second}
+		api.GET("/status", func(c *gin.Context) {			hc := &http.Client{Timeout: 3 * time.Second}
 			probe := func(url string) string {
 				resp, err := hc.Get(url)
 				if err != nil {
@@ -118,7 +141,7 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 					"base_url": cfg.LLM.BaseURL,
 					"key_set":  cfg.LLM.APIKey != "",
 				},
-				"mcp":   gin.H{"url": cfg.MCP.WebHunter.URL, "status": probe(mcpBase + "/health"), "tools": listMCPTools(cfg.MCP.WebHunter.URL, cfg.MCP.WebHunter.Token)},
+				"mcp":   gin.H{"url": cfg.MCP.WebHunter.URL, "status": probe(mcpBase + "/health"), "tools": listMCPTools(cfg.MCP.WebHunter.URL, cfg.MCP.WebHunter.Token), "availability": mcpToolAvailability(mcpBase, cfg.MCP.WebHunter.Token)},
 				"agent": gin.H{"url": agentURL, "status": probe(agentURL + "/healthz")},
 				"db":    gin.H{"path": cfg.Storage.SQLitePath},
 			})

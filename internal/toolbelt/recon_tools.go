@@ -73,12 +73,12 @@ func subfinderEnum(ctx context.Context, args map[string]interface{}) toolResult 
 	if domain == "" {
 		return errResult("subfinder_enum: `domain` required")
 	}
-	bin := argString(args, "bin", "subfinder")
+	
 	cmd := []string{"-d", domain, "-all", "-silent"}
 	if threads := argInt(args, "threads", 0); threads > 0 {
 		cmd = append(cmd, "-t", strconv.Itoa(threads))
 	}
-	out, err := safeExec(ctx, 5*time.Minute, bin, cmd...)
+	out, err := safeExec(ctx, 5*time.Minute, "subfinder", cmd...)
 	if err != nil {
 		return errResult("subfinder_enum: " + err.Error())
 	}
@@ -93,8 +93,8 @@ func assetfinderEnum(ctx context.Context, args map[string]interface{}) toolResul
 	if domain == "" {
 		return errResult("assetfinder_enum: `domain` required")
 	}
-	bin := argString(args, "bin", "assetfinder")
-	out, err := safeExec(ctx, 3*time.Minute, bin, "--subs-only", domain)
+	
+	out, err := safeExec(ctx, 3*time.Minute, "assetfinder", "--subs-only", domain)
 	if err != nil {
 		return errResult("assetfinder_enum: " + err.Error())
 	}
@@ -109,8 +109,8 @@ func gauHistory(ctx context.Context, args map[string]interface{}) toolResult {
 	if domain == "" {
 		return errResult("gau_history: `domain` required")
 	}
-	bin := argString(args, "bin", "gau")
-	out, err := safeExec(ctx, 3*time.Minute, bin, domain)
+	
+	out, err := safeExec(ctx, 3*time.Minute, "gau", domain)
 	if err != nil {
 		return errResult("gau_history: " + err.Error())
 	}
@@ -125,8 +125,8 @@ func waybackHistory(ctx context.Context, args map[string]interface{}) toolResult
 	if domain == "" {
 		return errResult("wayback_history: `domain` required")
 	}
-	bin := argString(args, "bin", "waybackurls")
-	out, err := safeExec(ctx, 3*time.Minute, bin, domain)
+	
+	out, err := safeExec(ctx, 3*time.Minute, "waybackurls", domain)
 	if err != nil {
 		return errResult("wayback_history: " + err.Error())
 	}
@@ -141,9 +141,9 @@ func katanaCrawl(ctx context.Context, args map[string]interface{}) toolResult {
 	if target == "" {
 		return errResult("katana_crawl: `url` required")
 	}
-	bin := argString(args, "bin", "katana")
+	
 	depth := strconv.Itoa(argInt(args, "depth", 2))
-	out, err := safeExec(ctx, 8*time.Minute, bin, "-u", target, "-d", depth, "-silent", "-kf", "all")
+	out, err := safeExec(ctx, 8*time.Minute, "katana", "-u", target, "-d", depth, "-silent", "-kf", "all")
 	if err != nil {
 		return errResult("katana_crawl: " + err.Error())
 	}
@@ -173,12 +173,12 @@ func httpxProbe(ctx context.Context, args map[string]interface{}) toolResult {
 	}
 	f.Close()
 
-	bin := argString(args, "bin", "httpx")
+	
 	cmd := []string{"-l", f.Name(), "-silent", "-no-color", "-status-code", "-title", "-tech-detect", "-content-length", "-web-server", "-follow-redirects"}
 	if timeout := argInt(args, "timeout", 0); timeout > 0 {
 		cmd = append(cmd, "-timeout", strconv.Itoa(timeout))
 	}
-	out, err := safeExec(ctx, 10*time.Minute, bin, cmd...)
+	out, err := safeExec(ctx, 10*time.Minute, "httpx", cmd...)
 	if err != nil {
 		return errResult("httpx_probe: " + err.Error())
 	}
