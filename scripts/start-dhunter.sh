@@ -169,7 +169,9 @@ status_all() {
 # watch_all — 简易 watchdog：前台循环检测三件套，任何一个挂了自动拉起并记录重启次数。
 # 生产环境建议改用 systemd / supervisor / docker restart=always。
 watch_all() {
-  echo "== Dhunter watchdog 启动（Ctrl+C 退出）=="
+  echo "== Dhunter watchdog 启动（Ctrl+C 退出，daemon 不会被 kill）=="
+  # daemon 都已 nohup 脱离会话，watchdog 退出只停止看护，进程继续运行。
+  trap 'echo ""; echo "[watch] 退出 watchdog (daemon 仍在运行)"; exit 0' INT TERM
   declare -A RESPAWN
   while true; do
     # 1. MCP (19124 → 由 token 文件决定端口？固定 9124)
@@ -212,7 +214,4 @@ case "${1:-start}" in
   logs)    tail -f /tmp/dhunter-server.log /tmp/dhunter-agent.log /tmp/dhunter-mcp.log ;;
   watch)   watch_all ;;
   *) echo "用法: $0 {start|stop|restart|status|logs|watch}"; exit 1 ;;
-esac
-  logs)    tail -f /tmp/dhunter-server.log /tmp/dhunter-agent.log /tmp/dhunter-mcp.log ;;
-  *) echo "用法: $0 {start|stop|restart|status|logs}"; exit 1 ;;
 esac
