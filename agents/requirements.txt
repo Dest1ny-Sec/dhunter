@@ -3,3 +3,9 @@ uvicorn[standard]>=0.27.0
 httpx>=0.27.0
 pydantic>=2.0.0
 sse-starlette>=2.0.0
+
+# Test-only deps (also pulled in by CI: `pip install -r requirements.txt`).
+# aiohttp backs the in-process MCP stand-ins in tests/test_multi_mcp.py
+# (spin up a JSON-RPC endpoint on 127.0.0.1:<random> for the hub to talk
+# to). Production never imports aiohttp — keep the runtime image slim.
+aiohttp>=3.9
