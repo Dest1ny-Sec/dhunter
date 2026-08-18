@@ -6,6 +6,8 @@ Dhunter 的版本变更记录。**详细 release notes 在 [GitHub Releases](htt
 
 | 版本 | 日期 | 类型 | 一句话 |
 |---|---|---|---|
+| [v0.7.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.7.0) | 2026-08-18 | feat | MCP 扩展中心：用户可挂载外部 MCP server，工具以 `<server>::<tool>` 命名空间聚合 |
+| [v0.6.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.6.0) | 2026-08-18 | feat | PoC 硬证据入报告 + ReAct 反思进 worker tool loop |
 | [v0.5.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.5.0) | 2026-08-18 | feat | 安全加固 + 可观测性 + watchdog + ADR |
 | [v0.4.0](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.4.0) | 2026-08-18 | feat | 资产模型 + 证据质量（adapted from dsh-pentest） |
 | [v0.3.5](https://github.com/Dest1ny-Sec/dhunter/releases/tag/v0.3.5) | 2026-08-18 | fix | Kali 安装修复 + Stargaze 视觉精修 |
