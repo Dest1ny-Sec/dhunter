@@ -180,6 +180,25 @@ var migrations = []string{
 		created_at  INTEGER NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_knowledge_host ON knowledge(host_family);`,
+
+	// mcp_servers — user-configured external MCP servers (the "extension
+	// center"). The built-in dhunter-mcp is always on; rows here add
+	// additional tool sources that the agent aggregates at run time.
+	// `transport` is reserved for future SSE/stdio variants; v0.7.0 only
+	// supports streamable-HTTP ("http"). `token` is stored as-is and
+	// redacted in API responses (only returned on Create).
+	`CREATE TABLE IF NOT EXISTS mcp_servers (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL UNIQUE,
+		url         TEXT NOT NULL,
+		transport   TEXT NOT NULL DEFAULT 'http',
+		token       TEXT NOT NULL DEFAULT '',
+		enabled     INTEGER NOT NULL DEFAULT 1,
+		description TEXT NOT NULL DEFAULT '',
+		created_at  INTEGER NOT NULL,
+		updated_at  INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled);`,
 }
 
 // Migrate runs every DDL statement in order, then applies per-column

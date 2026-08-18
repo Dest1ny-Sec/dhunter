@@ -157,22 +157,24 @@ type Stores struct {
 	Settings  *SettingsStore
 	Knowledge *KnowledgeStore
 	Assets    *AssetStore
+	MCPServers *MCPServerStore
 }
 
 // New constructs every store over the shared *db.DB.
 func New(database *db.DB) *Stores {
 	return &Stores{
-		DB:        database,
-		Targets:   &TargetStore{db: database},
-		Runs:      &RunStore{db: database},
-		Messages:  &MessageStore{db: database},
-		Vulns:     &VulnStore{db: database},
-		ToolCalls: &ToolCallStore{db: database},
-		Findings:  &FindingStore{db: database},
-		Board:     newBoard(database),
-		Settings:  &SettingsStore{db: database},
-		Knowledge: &KnowledgeStore{db: database},
-		Assets:    &AssetStore{db: database},
+		DB:         database,
+		Targets:    &TargetStore{db: database},
+		Runs:       &RunStore{db: database},
+		Messages:   &MessageStore{db: database},
+		Vulns:      &VulnStore{db: database},
+		ToolCalls:  &ToolCallStore{db: database},
+		Findings:   &FindingStore{db: database},
+		Board:      newBoard(database),
+		Settings:   &SettingsStore{db: database},
+		Knowledge:  &KnowledgeStore{db: database},
+		Assets:     &AssetStore{db: database},
+		MCPServers: &MCPServerStore{db: database},
 	}
 }
 
@@ -1266,4 +1268,224 @@ func (s *VulnStore) Count(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vulnerabilities`).Scan(&n)
 	return n, err
+}
+
+// ----- MCPServerStore -----
+
+// MCPServer is a user-configured external MCP server. The built-in
+// dhunter-mcp is always on (env-driven); rows here add additional tool
+// sources the agent aggregates at run time. External tools are
+// namespaced as `<server_name>::<tool_name>` in the LLM toolbelt so
+// they never collide with built-ins.
+//
+// `Token` is redacted by custom JSON marshalling (see MarshalJSON) —
+// it is returned exactly once, in the Create response, so the caller
+// can save it client-side. All other responses expose `HasToken` only.
+type MCPServer struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	URL         string    `json:"url"`
+	Transport   string    `json:"transport"` // "http" (v0.7.0 only)
+	Token       string    `json:"-"`        // see MarshalJSON
+	HasToken    bool      `json:"has_token"` // convenience: present in list/get
+	Enabled     bool      `json:"enabled"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	// includeToken forces the Token field into the JSON response. The
+	// Create handler sets it on its returned value; the other handlers
+	// leave it false so reads always see redacted payloads.
+	includeToken bool `json:"-"`
+}
+
+// MarshalJSON redacts Token by default; use WithToken to opt the value
+// into returning the Token field in the JSON body (the Create handler
+// does this exactly once so the caller can save the credential).
+func (m MCPServer) MarshalJSON() ([]byte, error) {
+	// Alias overrides the `json:"-"` on Token so we can conditionally
+	// re-enable it. Without the override, the tag would suppress the
+	// field even when we want to leak it.
+	type alias struct {
+		ID          string    `json:"id"`
+		Name        string    `json:"name"`
+		URL         string    `json:"url"`
+		Transport   string    `json:"transport"`
+		Token       string    `json:"token,omitempty"`
+		HasToken    bool      `json:"has_token"`
+		Enabled     bool      `json:"enabled"`
+		Description string    `json:"description,omitempty"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+	}
+	out := alias{
+		ID: m.ID, Name: m.Name, URL: m.URL, Transport: m.Transport,
+		Token: m.Token, HasToken: m.HasToken, Enabled: m.Enabled,
+		Description: m.Description, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+	}
+	if !m.includeToken {
+		out.Token = ""
+	}
+	return json.Marshal(out)
+}
+
+// WithToken returns a copy of the server whose JSON marshalling will
+// include the (otherwise redacted) token. Use only on values being
+// returned to the caller who just supplied the credential.
+func (m MCPServer) WithToken() MCPServer {
+	m.includeToken = true
+	return m
+}
+
+// MCPServerStore persists external MCP server entries.
+type MCPServerStore struct{ db *db.DB }
+
+// Create inserts a new external MCP server. Name uniqueness is enforced
+// by a UNIQUE index; conflict surfaces as a UNIQUE constraint error.
+func (s *MCPServerStore) Create(ctx context.Context, m *MCPServer) error {
+	if m.ID == "" {
+		m.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = now
+	}
+	m.UpdatedAt = now
+	if m.Transport == "" {
+		m.Transport = "http"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO mcp_servers (id, name, url, transport, token, enabled, description, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.Name, m.URL, m.Transport, m.Token, boolInt(m.Enabled), m.Description, m.CreatedAt.UnixMilli(), m.UpdatedAt.UnixMilli())
+	return err
+}
+
+// Update modifies an existing server in place. Zero-valued Token is
+// preserved (we don't wipe the token when the caller didn't send one).
+func (s *MCPServerStore) Update(ctx context.Context, m *MCPServer) error {
+	m.UpdatedAt = time.Now().UTC()
+	if m.Transport == "" {
+		m.Transport = "http"
+	}
+	// Use a conditional UPDATE so a blank token keeps the old one. The
+	// handler layer decides whether to clear it via SetToken.
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE mcp_servers SET
+			name        = ?,
+			url         = ?,
+			transport   = ?,
+			enabled     = ?,
+			description = ?,
+			updated_at  = ?
+		 WHERE id = ?`,
+		m.Name, m.URL, m.Transport, boolInt(m.Enabled), m.Description, m.UpdatedAt.UnixMilli(), m.ID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetToken replaces the token (or clears it when newToken == "").
+// Split out so the regular Update path doesn't accidentally wipe a
+// stored credential when the caller didn't include a token field.
+func (s *MCPServerStore) SetToken(ctx context.Context, id, newToken string) error {
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE mcp_servers SET token = ?, updated_at = ? WHERE id = ?`,
+		newToken, now.UnixMilli(), id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a server by id. No-op if it doesn't exist.
+func (s *MCPServerStore) Delete(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM mcp_servers WHERE id = ?`, id)
+	return err
+}
+
+// Get returns a single server. Token is redacted; HasToken is set
+// based on whether a non-empty token is stored.
+func (s *MCPServerStore) Get(ctx context.Context, id string) (*MCPServer, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, url, transport, token, enabled, description, created_at, updated_at
+		 FROM mcp_servers WHERE id = ?`, id)
+	return scanMCPServer(row)
+}
+
+// List returns all servers, newest first.
+func (s *MCPServerStore) List(ctx context.Context, limit int) ([]*MCPServer, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, transport, token, enabled, description, created_at, updated_at
+		 FROM mcp_servers ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*MCPServer, 0)
+	for rows.Next() {
+		m, err := scanMCPServer(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ListEnabled returns enabled servers only — used by the Python agent
+// at startup to learn which external MCPs to aggregate into its tool
+// registry. Token IS included here so the agent can auth without a
+// separate handshake.
+func (s *MCPServerStore) ListEnabled(ctx context.Context) ([]*MCPServer, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, transport, token, enabled, description, created_at, updated_at
+		 FROM mcp_servers WHERE enabled = 1 ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*MCPServer, 0)
+	for rows.Next() {
+		m, err := scanMCPServer(rows)
+		if err != nil {
+			return nil, err
+		}
+		// Skip empty/invalid rows defensively; agent will fall back to
+		// only the built-in MCP if every row is bad.
+		if m.URL == "" || m.Name == "" {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func scanMCPServer(r rowScanner) (*MCPServer, error) {
+	var m MCPServer
+	var cMs, uMs int64
+	var token string
+	if err := r.Scan(&m.ID, &m.Name, &m.URL, &m.Transport, &token, &m.Enabled, &m.Description, &cMs, &uMs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	m.CreatedAt = time.UnixMilli(cMs).UTC()
+	m.UpdatedAt = time.UnixMilli(uMs).UTC()
+	m.Token = token
+	m.HasToken = token != ""
+	return &m, nil
 }

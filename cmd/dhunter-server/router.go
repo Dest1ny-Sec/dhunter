@@ -120,6 +120,23 @@ func buildRouter(cfg *config.Config, stores *store.Stores, hub *stream.Hub, brid
 		api.GET("/targets/:id/assets", assetH.List)
 		api.POST("/targets/:id/assets", assetH.Create)
 
+		// MCP extension center — user-configured external MCP servers
+		// that the agent aggregates into its toolbelt (namespaced as
+		// `<server>::<tool>`). The built-in dhunter-mcp is unaffected.
+		mcpH := handler.NewMCPHandler(stores, &handler.HTTPAgentClient{
+			BaseURL: cfg.Agent.PythonURL,
+			Token:   cfg.Agent.Token,
+			Timeout: 12 * time.Second,
+		})
+		api.GET("/mcp-servers", mcpH.List)
+		api.GET("/mcp-servers/active", mcpH.Active) // for the agent
+		api.GET("/mcp-servers/:id", mcpH.Get)
+		api.POST("/mcp-servers", mcpH.Create)
+		api.PUT("/mcp-servers/:id", mcpH.Update)
+		api.DELETE("/mcp-servers/:id", mcpH.Delete)
+		api.POST("/mcp-servers/:id/test", mcpH.Test)
+		api.POST("/mcp-servers/reload", mcpH.Reload)
+
 		api.GET("/status", func(c *gin.Context) {			hc := &http.Client{Timeout: 3 * time.Second}
 			probe := func(url string) string {
 				resp, err := hc.Get(url)

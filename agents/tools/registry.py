@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from .mcp_client import MCPClient, MCPError
+from .multi_mcp import ExternalMCPHub
 
 log = logging.getLogger(__name__)
 
@@ -407,8 +408,12 @@ class ToolRegistry:
     server. Both paths return a uniform `{content, is_error}` dict.
     """
 
-    def __init__(self, mcp_client: MCPClient | None = None):
+    def __init__(self, mcp_client: MCPClient | None = None, ext_mcp_hub: ExternalMCPHub | None = None):
         self.mcp = mcp_client or MCPClient()
+        # External MCP hub (the "extension center"). The agent bootstraps
+        # it at startup with load_from_backend() and may reload later
+        # to pick up user-added servers.
+        self.ext = ext_mcp_hub or ExternalMCPHub()
         self._mcp_tools: list[dict[str, Any]] = []
         self._initialized = False
         self._init_error: str | None = None
@@ -503,6 +508,7 @@ class ToolRegistry:
 
     async def aclose(self) -> None:
         await self.mcp.aclose()
+        await self.ext.aclose()
 
     def all_tools(self) -> list[dict[str, Any]]:
         """Anthropic-format tool list (with `input_schema`).
@@ -510,6 +516,9 @@ class ToolRegistry:
         MCP tools that duplicate a fallback tool (http_request / write_finding
         / write_fact) are dropped so the LLM never sees two same-named tools
         — the fallback wins because it carries the run context (run_id).
+
+        External MCP tools come pre-namespaced as `<server>::<tool>` from
+        the hub; we just append them.
         """
         tools: list[dict[str, Any]] = [dict(t) for t in _FALLBACK_TOOL_DEFS]
         fallback_names = {t["name"] for t in _FALLBACK_TOOL_DEFS}
@@ -525,6 +534,10 @@ class ToolRegistry:
                 "description": t.get("description") or "",
                 "input_schema": schema,
             })
+        # External MCP tools: pre-namespaced, never collide with the
+        # built-in set; no dedup needed.
+        for t in self.ext.all_tools():
+            tools.append(t)
         return tools
 
     def mcp_status(self) -> dict[str, Any]:
@@ -532,6 +545,7 @@ class ToolRegistry:
             "ready": self._initialized,
             "tool_count": len(self._mcp_tools),
             "error": self._init_error,
+            "external": self.ext.status(),
         }
 
     async def call(self, name: str, arguments: dict[str, Any] | None = None, *, current_run_id: str = "") -> dict[str, Any]:
@@ -570,6 +584,15 @@ class ToolRegistry:
             if name == "http_request":
                 args = self._inject_auth(args, current_run_id)
             return await handler(args)
+        # External MCP tool? Hub already handles the namespaced name
+        # and returns a uniform {content, is_error}. We probe it
+        # BEFORE the built-in MCP so a built-in with the same name (a
+        # bug we'd want to know about) still surfaces as a name clash
+        # rather than a silent win by one or the other. Names of
+        # external tools are `<server>::<tool>`, so they cannot match
+        # the bare name we sent to the built-in MCP anyway.
+        if "::" in name:
+            return await self.ext.call(name, args)
         # Delegate to MCP. Ensure MCP is loaded (retries after startup races).
         await self.ensure_mcp()
         try:

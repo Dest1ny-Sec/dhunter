@@ -66,6 +66,16 @@ async def lifespan(app: FastAPI):
         await registry.initialize()
     except Exception as e:  # noqa: BLE001
         log.warning("tool registry init error: %s", e)
+    # External MCP hub: fetch the user's enabled external MCP servers
+    # and connect to each. Failure of one server is logged but does
+    # not abort the rest (the hub isolates per-server).
+    try:
+        ext_status = await registry.ext.load_from_backend()
+        if ext_status:
+            connected = sum(1 for s in ext_status.values() if s.get("status") == "connected")
+            log.info("external MCPs: %d/%d connected", connected, len(ext_status))
+    except Exception as e:  # noqa: BLE001
+        log.warning("external MCP load error: %s", e)
     app.state.registry = registry
     app.state.board = BoardClient()
     app.state.system_prompt = _load_system_prompt()
@@ -262,6 +272,21 @@ async def stream_events(run_id: str, request: Request) -> EventSourceResponse:
                 break
 
     return EventSourceResponse(event_gen())
+
+
+@app.post("/v1/mcp/reload", dependencies=[Depends(require_token)])
+async def reload_external_mcps(request: Request):
+    """Re-fetch the user's enabled external MCP servers from the Go
+    backend and reconnect. Lets the user add a new server in the
+    Settings UI and pick it up without restarting the agent.
+
+    The current MCP connection is closed only after the new clients
+    are ready, so an in-flight call doesn't race the close.
+    """
+    registry = request.app.state.registry
+    status = await registry.ext.load_from_backend()
+    connected = sum(1 for s in status.values() if s.get("status") == "connected")
+    return {"reloaded": len(status), "connected": connected, "status": status}
 
 
 # --- Internals ----------------------------------------------------------
