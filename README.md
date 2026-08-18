@@ -53,6 +53,17 @@
 
 **MCP 扩展** — 把你自己的 MCP server 接进来。工具以 `<server>::<tool>` 命名空间暴露给 Agent，与内置 22 个工具并行。修改后点「同步到 Agent」即时生效，不必重启。
 
+托管型 Streamable HTTP MCP 的鉴权 Header 和 Scheme 可分别配置；默认仍为
+`Authorization: Bearer <token>`，将 Scheme 留空则直接发送 Token。客户端会自动保存
+`initialize` 响应中的 `Mcp-Session-Id` 并在后续请求中透传。例如接入 Quake MCP 时可填：
+
+```text
+URL:         https://quake.360.net/mcp/
+Auth Header: X-QuakeToken
+Auth Scheme: （留空）
+Token:       <Quake API Token>
+```
+
 - 每行显示「● Agent 已同步 · 58 秒前」+ per-row 状态指示（绿/红/灰点 + 工具数）
 - 私网 / loopback / 云元数据 URL 自动加 ⚠ 黄色提示（不阻断，本地 MCP 合法）
 - Token 仅在 Create 响应中明文返回一次

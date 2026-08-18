@@ -48,9 +48,18 @@ class MCPError(RuntimeError):
 
 
 class MCPClient:
-    def __init__(self, url: str | None = None, token: str | None = None):
+    def __init__(
+        self,
+        url: str | None = None,
+        token: str | None = None,
+        auth_header: str = "Authorization",
+        auth_scheme: str = "Bearer",
+    ):
         self.url = (url or os.environ.get("DHUNTER_MCP_URL") or DEFAULT_MCP_URL).rstrip("/")
         self.token = token if token is not None else os.environ.get("DHUNTER_MCP_TOKEN", DEFAULT_MCP_TOKEN)
+        self.auth_header = auth_header or "Authorization"
+        self.auth_scheme = auth_scheme
+        self.session_id = ""
         self._id = 0
         self._client: httpx.AsyncClient | None = None
 
@@ -67,6 +76,7 @@ class MCPClient:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
         self._client = None
+        self.session_id = ""
 
     # --- core JSON-RPC --------------------------------------------------
 
@@ -80,7 +90,12 @@ class MCPClient:
             "accept": "application/json, text/event-stream",
         }
         if self.token:
-            h["authorization"] = f"Bearer {self.token}"
+            value = self.token
+            if self.auth_scheme:
+                value = f"{self.auth_scheme} {value}"
+            h[self.auth_header] = value
+        if self.session_id:
+            h["mcp-session-id"] = self.session_id
         return h
 
     async def _rpc(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -94,6 +109,9 @@ class MCPClient:
 
         client = await self._ensure_client()
         resp = await client.post(self.url, json=payload, headers=self._headers())
+        session_id = resp.headers.get("mcp-session-id", "").strip()
+        if session_id:
+            self.session_id = session_id
         if resp.status_code >= 400:
             body = resp.text[:500]
             raise MCPError(resp.status_code, f"HTTP {resp.status_code}: {body}")

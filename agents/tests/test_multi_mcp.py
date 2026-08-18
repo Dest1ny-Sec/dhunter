@@ -58,10 +58,23 @@ class MockMCPServer:
     """Tiny in-process MCP stand-in. Serves `initialize` + `tools/list`
     + `tools/call` over an httpx-compatible HTTP endpoint."""
 
-    def __init__(self, name: str, tools: list[dict[str, Any]], call_handler=None):
+    def __init__(
+        self,
+        name: str,
+        tools: list[dict[str, Any]],
+        call_handler=None,
+        *,
+        auth_header: str = "",
+        auth_value: str = "",
+        require_session: bool = False,
+    ):
         self._name = name
         self._tools = tools
         self._call_handler = call_handler
+        self._auth_header = auth_header
+        self._auth_value = auth_value
+        self._require_session = require_session
+        self._session_id = f"{name}-session"
         self._app = None
         self._runner = None
         self._site = None
@@ -85,6 +98,8 @@ class MockMCPServer:
 
     async def _handle(self, request):
         from aiohttp import web  # type: ignore
+        if self._auth_header and request.headers.get(self._auth_header) != self._auth_value:
+            return web.json_response({"error": "unauthorized"}, status=401)
         body = await request.json()
         method = body.get("method")
         rid = body.get("id")
@@ -97,7 +112,9 @@ class MockMCPServer:
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": self._name, "version": "1.0.0"},
                 },
-            })
+            }, headers={"Mcp-Session-Id": self._session_id} if self._require_session else None)
+        if self._require_session and request.headers.get("Mcp-Session-Id") != self._session_id:
+            return web.json_response({"error": "missing session"}, status=400)
         if method == "tools/list":
             return web.json_response({"jsonrpc": "2.0", "id": rid, "result": {"tools": self._tools}})
         if method == "tools/call":
@@ -255,6 +272,43 @@ def test_hub_load_from_backend_with_mock():
         finally:
             await alpha.stop()
             await beta.stop()
+            await backend.stop()
+
+    asyncio.run(scenario())
+
+
+def test_hub_supports_custom_auth_and_streamable_http_session():
+    """Hosted MCPs may use a raw vendor header and require the session ID
+    returned by initialize on every subsequent request."""
+    async def scenario():
+        quake = MockMCPServer(
+            "quake",
+            [{"name": "quake_service_data", "description": "assets", "inputSchema": {"type": "object"}}],
+            call_handler=lambda n, a: "quake ok",
+            auth_header="X-QuakeToken",
+            auth_value="quake-token",
+            require_session=True,
+        )
+        await quake.start()
+        backend = MockBackend([{
+            "name": "quake",
+            "url": quake.url,
+            "transport": "http",
+            "token": "quake-token",
+            "auth_header": "X-QuakeToken",
+            "auth_scheme": "",
+        }])
+        await backend.start()
+        try:
+            hub = ExternalMCPHub()
+            status = await hub.load_from_backend(backend_url=backend.url, token="backend-token")
+            assert status["quake"]["status"] == "connected"
+            assert {t["name"] for t in hub.all_tools()} == {"quake::quake_service_data"}
+            result = await hub.call("quake::quake_service_data", {"query": 'domain:"example.com"'})
+            assert result["is_error"] is False
+            assert result["content"] == "quake ok"
+        finally:
+            await quake.stop()
             await backend.stop()
 
     asyncio.run(scenario())

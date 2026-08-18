@@ -58,6 +58,9 @@ func TestMCPHandler_CRUD_Roundtrip(t *testing.T) {
 	if created.ID == "" || created.Name != "nuclei" {
 		t.Fatalf("bad create response: %+v", created)
 	}
+	if created.AuthHeader != "Authorization" || created.AuthScheme != "Bearer" {
+		t.Fatalf("default auth config is wrong: header=%q scheme=%q", created.AuthHeader, created.AuthScheme)
+	}
 	// Token is returned on create so the user can save it client-side.
 	// We can't decode into MCPServer directly because the struct tags
 	// the field as `json:"-"` for redaction — peek into the raw map
@@ -114,6 +117,9 @@ func TestMCPHandler_CRUD_Roundtrip(t *testing.T) {
 	if got.Token != "secret-token" {
 		t.Fatalf("token wiped on update: %q", got.Token)
 	}
+	if got.AuthHeader != "Authorization" || got.AuthScheme != "Bearer" {
+		t.Fatalf("auth config changed on update: header=%q scheme=%q", got.AuthHeader, got.AuthScheme)
+	}
 
 	// 4. UPDATE — explicitly clear token.
 	clr := updateMCPReq{Name: "nuclei-v2", URL: "http://127.0.0.1:9999/mcp", Transport: "http", ClearToken: true}
@@ -154,6 +160,9 @@ func TestMCPHandler_RejectsBadInput(t *testing.T) {
 		{"missing url", createMCPReq{Name: "ok", URL: "", Transport: "http"}, 400},
 		{"non-http url", createMCPReq{Name: "ok", URL: "ftp://x", Transport: "http"}, 400},
 		{"bad transport", createMCPReq{Name: "ok", URL: "http://x", Transport: "stdio"}, 400},
+		{"bad auth header", createMCPReq{Name: "ok", URL: "http://x", Transport: "http", AuthHeader: strPtr("bad header")}, 400},
+		{"reserved auth header", createMCPReq{Name: "ok", URL: "http://x", Transport: "http", AuthHeader: strPtr("Mcp-Session-Id")}, 400},
+		{"bad auth scheme", createMCPReq{Name: "ok", URL: "http://x", Transport: "http", AuthScheme: strPtr("two words")}, 400},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,6 +300,69 @@ func TestMCPHandler_TestEndpoint_ReportsFailure(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Fatalf("test should include an error message, body=%s", w.Body.String())
+	}
+}
+
+func TestMCPHandler_TestEndpoint_CustomAuthAndSession(t *testing.T) {
+	stores, cleanup := newMCPTestEnv(t)
+	defer cleanup()
+
+	const sessionID = "quake-session"
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-QuakeToken"); got != "quake-token" {
+			http.Error(w, "missing custom auth", http.StatusUnauthorized)
+			return
+		}
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		id, _ := req["id"].(float64)
+		switch method {
+		case "initialize":
+			if got := r.Header.Get("Mcp-Session-Id"); got != "" {
+				http.Error(w, "unexpected initial session", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Mcp-Session-Id", sessionID)
+			writeJSONRPC(w, int(id), map[string]any{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "session-mock", "version": "1.0.0"},
+			})
+		case "tools/list":
+			if got := r.Header.Get("Mcp-Session-Id"); got != sessionID {
+				http.Error(w, "missing session", http.StatusBadRequest)
+				return
+			}
+			writeJSONRPC(w, int(id), map[string]any{
+				"tools": []map[string]any{{"name": "quake_service_data"}},
+			})
+		default:
+			http.Error(w, "unknown method", http.StatusBadRequest)
+		}
+	}))
+	defer mock.Close()
+
+	h := NewMCPHandler(stores, nil)
+	r := gin.New()
+	r.Use(bypassAuth())
+	h.Register(r.Group(""))
+	w := doJSON(r, "POST", "/mcp-servers", createMCPReq{
+		Name: "quake", URL: mock.URL, Transport: "http", Token: "quake-token",
+		AuthHeader: strPtr("X-QuakeToken"), AuthScheme: strPtr(""),
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created store.MCPServer
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	if created.AuthHeader != "X-QuakeToken" || created.AuthScheme != "" {
+		t.Fatalf("custom auth not persisted: header=%q scheme=%q", created.AuthHeader, created.AuthScheme)
+	}
+
+	w = doJSON(r, "POST", "/mcp-servers/"+created.ID+"/test", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "quake_service_data") {
+		t.Fatalf("session-aware probe failed: %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -444,8 +516,8 @@ func TestMCPHandler_AgentStatus_PassesThrough(t *testing.T) {
 	stores, cleanup := newMCPTestEnv(t)
 	defer cleanup()
 	payload := map[string]any{
-		"last_reload_at":     1700000000.0,
-		"last_reload_error":  "",
+		"last_reload_at":    1700000000.0,
+		"last_reload_error": "",
 		"servers": []any{
 			map[string]any{"name": "nuclei", "status": "connected", "tool_count": 3, "tools": []any{"nuclei_scan"}, "error": ""},
 		},
@@ -530,7 +602,8 @@ func writeJSONRPC(w http.ResponseWriter, id int, result any) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 }
 
-func boolPtr(b bool) *bool { return &b }
+func boolPtr(b bool) *bool    { return &b }
+func strPtr(s string) *string { return &s }
 func contains(xs []string, s string) bool {
 	for _, x := range xs {
 		if x == s {

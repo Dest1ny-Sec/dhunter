@@ -186,13 +186,17 @@ var migrations = []string{
 	// additional tool sources that the agent aggregates at run time.
 	// `transport` is reserved for future SSE/stdio variants; v0.7.0 only
 	// supports streamable-HTTP ("http"). `token` is stored as-is and
-	// redacted in API responses (only returned on Create).
+	// redacted in API responses (only returned on Create). `auth_header`
+	// and `auth_scheme` let hosted MCPs use credentials such as a raw
+	// X-API-Key instead of forcing Authorization: Bearer.
 	`CREATE TABLE IF NOT EXISTS mcp_servers (
 		id          TEXT PRIMARY KEY,
 		name        TEXT NOT NULL UNIQUE,
 		url         TEXT NOT NULL,
 		transport   TEXT NOT NULL DEFAULT 'http',
 		token       TEXT NOT NULL DEFAULT '',
+		auth_header TEXT NOT NULL DEFAULT 'Authorization',
+		auth_scheme TEXT NOT NULL DEFAULT 'Bearer',
 		enabled     INTEGER NOT NULL DEFAULT 1,
 		description TEXT NOT NULL DEFAULT '',
 		created_at  INTEGER NOT NULL,
@@ -250,6 +254,8 @@ func (d *DB) Migrate(ctx context.Context) error {
 		{"targets", "authorization TEXT NOT NULL DEFAULT ''"},
 		{"facts", "kind TEXT NOT NULL DEFAULT 'info'"},
 		{"facts", "confidence REAL NOT NULL DEFAULT 0.5"},
+		{"mcp_servers", "auth_header TEXT NOT NULL DEFAULT 'Authorization'"},
+		{"mcp_servers", "auth_scheme TEXT NOT NULL DEFAULT 'Bearer'"},
 	} {
 		if !d.columnExists(ctx, col.table, strings.TrimSpace(strings.SplitN(col.def, " ", 2)[0])) {
 			if _, err := d.ExecContext(ctx, "ALTER TABLE "+col.table+" ADD COLUMN "+col.def); err != nil {
